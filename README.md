@@ -1,3 +1,11 @@
+Ortho is a python based app that renders orthographic templates from existing 3d models, akin to a ‘blueprint creator’. It’s free and requires only python and a browser. No coding or commands, just run the launcher, then drag and drop your file or zip,then configure in the browser. Runs on PC and Mac, pretty much fool proof. 
+
+No more googling for low res watermarked inaccurate paywalled. Templates. Not AI. 
+<img width="4503" height="14692" alt="2758378b-d35c-4369-ad7b-99fd9dcb32bd" src="https://github.com/user-attachments/assets/7605c573-c8ff-4b41-a390-4debfb359768" />
+
+
+
+
 # Orthographic Template Generator — Setup & Usage
 
 Turns a 3D car/vehicle model file into a clean black-and-white orthographic
