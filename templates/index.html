@@ -741,7 +741,7 @@ function loadPreview(sessionId, ext) {
   } else if (ext === '.dae') {
     new ColladaLoader().load(url, c => onLoad(c.scene), undefined, onError);
   } else if (ext === '.stl') {
-    new STLLoader().load(url, geo => onLoad(new THREE.Mesh(geo, buildDefaultMaterial())), undefined, onError);
+    new STLLoader().load(url, geo => onLoad(new THREE.Mesh(geo)), undefined, onError);
   } else {
     onError();
   }
