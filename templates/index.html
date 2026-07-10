@@ -112,6 +112,19 @@
   }
 
   document.addEventListener('DOMContentLoaded', updateThemeToggleLabel);
+
+  function updateLabelSectionsState() {
+    var ribChecked = document.getElementById('rib_cb').checked;
+    var cb = document.getElementById('label_sections_cb');
+    if (!ribChecked) {
+      cb.checked = false;
+      cb.disabled = true;
+    } else {
+      cb.disabled = false;
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', updateLabelSectionsState);
 </script>
 
 <div class="section">
@@ -160,6 +173,9 @@
     </label>
     <span id="rib_cuts_val">1</span>
     <span style="color:#666;font-size:0.85em;">(1 = single cut at the midpoint. Higher = more evenly-spaced cuts)</span>
+  </div>
+  <div class="color_row" style="margin-top:6px;">
+    <label><input type="checkbox" id="label_sections_cb"> Number cross-section markers on views (S1, S2…)</label>
   </div>
 
   <h2 style="margin-top:20px;">3b. Orientation (only touch if the model loads facing the wrong way)</h2>
@@ -285,6 +301,8 @@ function applyGlobalPrefs(prefs) {
   document.getElementById('rotation_deg_input').value = prefs.rotation_deg || 0;
   document.getElementById('output_format_select').value = prefs.output_format || 'png';
   document.getElementById('label_parts_cb').checked = !!prefs.label_parts;
+  document.getElementById('label_sections_cb').checked = !!prefs.label_sections;
+  updateLabelSectionsState();
   document.getElementById('keep_uploads_cb').checked = !!prefs.keep_uploads;
 }
 
@@ -292,6 +310,8 @@ fetch('/preferences')
   .then(r => r.json())
   .then(prefs => applyGlobalPrefs(prefs))
   .catch(() => {});  // non-fatal if this fails; controls just keep their defaults
+
+document.getElementById('rib_cb').addEventListener('change', updateLabelSectionsState);
 
 dropZone.addEventListener('click', () => fileInput.click());
 dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
@@ -422,6 +442,7 @@ function generate() {
     rotation_deg: parseFloat(document.getElementById('rotation_deg_input').value) || 0,
     output_format: document.getElementById('output_format_select').value,
     label_parts: document.getElementById('label_parts_cb').checked,
+    label_sections: document.getElementById('label_sections_cb').checked,
     keep_uploads: document.getElementById('keep_uploads_cb').checked,
   };
 

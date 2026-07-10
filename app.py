@@ -122,6 +122,7 @@ DEFAULT_GLOBAL_PREFS = {
     "front_flip": False,
     "output_format": "png",
     "label_parts": False,
+    "label_sections": False,
     "ao_mode": "ssao",
     "keep_uploads": False,
 }
@@ -301,6 +302,7 @@ def generate():
             front_flip = bool(data.get("front_flip", False))
             rotation_deg = float(data.get("rotation_deg", 0) or 0)
             label_parts = bool(data.get("label_parts", False))
+            label_sections = bool(data.get("label_sections", True))
             keep_uploads = bool(data.get("keep_uploads", False))
             # "vertex" (fast: per-vertex baked AO, can look blocky on large
             # flat panels) or "ssao" (default: screen-space AO computed
@@ -324,6 +326,7 @@ def generate():
                 "ao": ao_enabled, "ao_darkness": ao_darkness, "up_axis": up_axis,
                 "front_flip": front_flip, "rotation_deg": rotation_deg,
                 "output_format": output_format, "label_parts": label_parts,
+                "label_sections": label_sections,
                 "ao_mode": ao_mode, "keep_uploads": keep_uploads,
             })
 
@@ -425,6 +428,7 @@ def generate():
                 bg_color=bg_color, line_color=line_color, scale_pct=scale_pct,
                 model_name=model_display_name,
                 part_numbers=(part_numbers if label_parts else None),
+                label_sections=label_sections,
             )
             yield _event("Done.", 1.0, done=True, image_url=f"/outputs/{out_name}")
 

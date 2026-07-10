@@ -146,14 +146,20 @@ def _draw_view(ax, result, bbox, line_color, bg_color="#FFFFFF",
         # pixel regardless of where along the axis it actually is), so a
         # cut position has no meaningful line to draw there at all —
         # callers simply don't pass markers for those views.
-        for frac in (rib_marker_x_fracs or []):
+        for frac, num in (rib_marker_x_fracs or []):
             x = xmin + frac * (xmax - xmin)
             ax.plot([x, x], [ymin, ymax], linestyle=(0, (2, 4)), linewidth=0.5,
                     color=line_color, alpha=0.35, zorder=1, solid_capstyle="butt")
-        for frac in (rib_marker_y_fracs or []):
+            if num is not None:
+                ax.text(x, ymin + (ymax - ymin) * 0.02, f"S{num}", ha="center", va="top",
+                        fontsize=18 * cs, family="DejaVu Sans", color=line_color, alpha=0.85, zorder=1)
+        for frac, num in (rib_marker_y_fracs or []):
             y = ymin + frac * (ymax - ymin)
             ax.plot([xmin, xmax], [y, y], linestyle=(0, (2, 4)), linewidth=0.5,
                     color=line_color, alpha=0.35, zorder=1, solid_capstyle="butt")
+            if num is not None:
+                ax.text(xmin + (xmax - xmin) * 0.01, y, f"S{num}", ha="left", va="center",
+                        fontsize=18 * cs, family="DejaVu Sans", color=line_color, alpha=0.85, zorder=1)
 
     outer_segs = [np.column_stack([c[:, 1], c[:, 0]]) for c in result["outer_contours"]]
     if outer_segs:
@@ -258,7 +264,8 @@ LABEL_GAP_PX = 10  # px, fixed gap between a view/rib panel's bottom edge and
 def compose_image(view_results, rib_sections, rib_ppm, output_path,
                    bg_color="#FFFFFF", line_color="#000000",
                    scale_pct=100, dpi_base=250,
-                   model_name=None, show_chrome=True, part_numbers=None):
+                   model_name=None, show_chrome=True, part_numbers=None,
+                   label_sections=True):
     """view_results: dict of {view_name: render_view() result}, only for
     views the user actually requested.
     rib_sections: list of rib cuts, each a list of (p0,p1) segment pairs
@@ -424,7 +431,11 @@ def compose_image(view_results, rib_sections, rib_ppm, output_path,
                 w_v, h_v = sizes[name]
                 ax = add_axes_px(x_cursor, y_cursor, w_v, view_row_h)
                 axis_kind, mirrored = _RIB_MARKER_AXIS.get(name, (None, False))
-                fracs_for_view = [(1 - f if mirrored else f) for f in rib_fracs] if axis_kind else []
+                fracs_for_view = (
+                    [(1 - f if mirrored else f, (i + 1) if (show_chrome and label_sections) else None)
+                     for i, f in enumerate(rib_fracs)]
+                    if axis_kind else []
+                )
                 _draw_view(
                     ax, view_results[name], bboxes[name], line_color, bg_color,
                     label=(name.upper() if show_chrome else None),
