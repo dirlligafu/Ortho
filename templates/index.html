@@ -356,6 +356,7 @@ function renderPartList(filterText) {
     cb.id = 'part_' + shown;
     cb.addEventListener('change', () => {
       if (cb.checked) excludedParts.delete(name); else excludedParts.add(name);
+      updatePartCount();
     });
     const label = document.createElement('label');
     label.setAttribute('for', cb.id);
@@ -364,6 +365,12 @@ function renderPartList(filterText) {
     row.appendChild(label);
     box.appendChild(row);
   });
+  updatePartCount();
+}
+
+function updatePartCount() {
+  const filterText = document.getElementById('part_filter').value.toLowerCase();
+  const shown = allPartNames.filter(n => !filterText || n.toLowerCase().includes(filterText)).length;
   document.getElementById('part_count').textContent =
     shown + ' of ' + allPartNames.length + ' shown, ' +
     (allPartNames.length - excludedParts.size) + ' included';
