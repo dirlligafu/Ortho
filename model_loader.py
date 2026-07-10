@@ -18,6 +18,7 @@ in this environment. We don't need textures for line-art rendering anyway.
 
 import os
 import re
+import shutil
 import tempfile
 import numpy as np
 import trimesh
@@ -117,7 +118,7 @@ def _parse_obj_groups(path):
 
 
 
-def load_model(path):
+def load_model(path, kn5_preview_out=None):
     """Loads any supported 3D model file and returns (mesh, part_face_ranges, uv)
     where part_face_ranges maps {part_name: (face_start_index, face_end_index)}
     against mesh.faces, so the caller can map checkbox selections back to
@@ -125,6 +126,9 @@ def load_model(path):
     aligned with mesh.vertices, or None if no usable UV data was found —
     only the KN5/OBJ path currently extracts it (see _load_obj_with_real_groups);
     other formats (.dae/.stl/.gltf/.glb) always return None here for now.
+
+    kn5_preview_out: if given, the converted OBJ is copied there before the
+    temp directory is cleaned up, so callers can serve it for preview purposes.
     """
     ext = os.path.splitext(path)[1].lower()
     if ext not in SUPPORTED_EXTENSIONS:
@@ -140,6 +144,8 @@ def load_model(path):
                 kn5_convert(path, tmp_obj)
             except Exception as e:
                 raise ModelLoadError(f"Failed to convert KN5 file: {e}") from e
+            if kn5_preview_out:
+                shutil.copy2(tmp_obj, kn5_preview_out)
             return _load_obj_with_real_groups(tmp_obj)
 
     if ext == ".obj":

@@ -63,7 +63,7 @@ import os
 import json
 import uuid
 
-from flask import Flask, request, render_template, jsonify, send_from_directory, Response, stream_with_context
+from flask import Flask, request, render_template, jsonify, send_from_directory, send_file, Response, stream_with_context
 
 from model_loader import load_model, build_filtered_mesh, ModelLoadError, SUPPORTED_EXTENSIONS, load_model_from_zip, remap_part_face_ranges
 from renderer import get_model_scale, detect_front_axis, render_view, render_rib_sections, AxisConfig, compute_ambient_occlusion, rotate_mesh_around_up_axis, compute_part_centroids, project_part_labels, AOPerformanceError, finalize_ssao_views, compute_directional_shading
@@ -175,42 +175,62 @@ def upload():
         }), 400
 
     keep_uploads = request.form.get("keep_uploads", "0") == "1"
+    session_id = str(uuid.uuid4())
+
     if keep_uploads:
         save_path = os.path.join(UPLOAD_DIR, f.filename)
     else:
-        # Default behavior: don't leave a permanent copy in UPLOAD_DIR.
-        # Save into a dedicated tmp folder and delete it right after the
-        # mesh is parsed (in `finally`, so a failed parse doesn't leave
-        # orphaned temp files either).
-        tmp_name = f"{uuid.uuid4().hex}{ext}"
-        save_path = os.path.join(UPLOAD_TMP_DIR, tmp_name)
+        save_path = os.path.join(UPLOAD_TMP_DIR, f"{session_id}{ext}")
     f.save(save_path)
+
+    # Determine the path Three.js will load for the 3D preview.
+    # KN5 files are converted to OBJ internally; we save a copy of that OBJ.
+    # ZIP uploads don't produce a single loadable file, so preview is skipped.
+    if is_zip:
+        preview_path = None
+        preview_ext = None
+    elif ext == ".kn5":
+        preview_path = os.path.join(UPLOAD_TMP_DIR, f"{session_id}.obj")
+        preview_ext = ".obj"
+    else:
+        preview_path = save_path
+        preview_ext = ext
 
     chosen_filename = f.filename
     zip_warning = None
+    parse_ok = False
     try:
         try:
             if is_zip:
                 mesh, part_face_ranges, uv, chosen_filename, zip_warning = load_model_from_zip(save_path)
+            elif ext == ".kn5":
+                mesh, part_face_ranges, uv = load_model(save_path, kn5_preview_out=preview_path)
             else:
                 mesh, part_face_ranges, uv = load_model(save_path)
+            parse_ok = True
         except ModelLoadError as e:
             return jsonify({"error": str(e)}), 400
         except Exception as e:
             return jsonify({"error": f"Unexpected error loading file: {e}"}), 500
     finally:
-        if not keep_uploads:
-            try:
-                os.remove(save_path)
-            except Exception:
-                pass
+        # On parse failure, clean up temp files. On success, keep them so the
+        # /preview/<session_id> endpoint can serve the file for the 3D viewer.
+        # UPLOAD_TMP_DIR is wiped on next app startup, so no permanent accumulation.
+        if not parse_ok and not keep_uploads:
+            for _p in (save_path, preview_path):
+                if _p and os.path.exists(_p):
+                    try:
+                        os.remove(_p)
+                    except Exception:
+                        pass
 
-    session_id = str(uuid.uuid4())
     _MODEL_CACHE[session_id] = {
         "mesh": mesh,
         "part_face_ranges": part_face_ranges,
         "filename": chosen_filename,
         "uv": uv,
+        "preview_path": preview_path,
+        "preview_ext": preview_ext,
     }
 
     # Load saved selection state for this filename, if any.
@@ -233,9 +253,21 @@ def upload():
         "face_count": len(mesh.faces),
     }
     response["has_uv"] = uv is not None
+    response["preview_ext"] = preview_ext
     if zip_warning:
         response["warning"] = zip_warning
     return jsonify(response)
+
+
+@app.route("/preview/<sid>")
+def preview(sid):
+    """Serves the uploaded model file for the Three.js 3D preview panel."""
+    if sid not in _MODEL_CACHE:
+        return "Session not found", 404
+    p = _MODEL_CACHE[sid].get("preview_path")
+    if not p or not os.path.exists(p):
+        return "Preview file not available", 404
+    return send_file(p)
 
 
 @app.route("/generate", methods=["POST"])
