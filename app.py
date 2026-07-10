@@ -302,7 +302,7 @@ def generate():
             front_flip = bool(data.get("front_flip", False))
             rotation_deg = float(data.get("rotation_deg", 0) or 0)
             label_parts = bool(data.get("label_parts", False))
-            label_sections = bool(data.get("label_sections", True))
+            label_sections = bool(data.get("label_sections", False))
             keep_uploads = bool(data.get("keep_uploads", False))
             # "vertex" (fast: per-vertex baked AO, can look blocky on large
             # flat panels) or "ssao" (default: screen-space AO computed
