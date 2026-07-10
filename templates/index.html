@@ -612,8 +612,6 @@ function applyShading(mode) {
     const wasHighlighted = obj === litMesh;
     obj.material = buildMaterial(mode);
     if (wasHighlighted) { setHighlight(obj, true); }
-    // Show/hide edge children: edges are redundant in wireframe mode
-    obj.children.forEach(c => { if (c.isLineSegments) c.visible = (mode !== 'wireframe'); });
   });
 }
 
