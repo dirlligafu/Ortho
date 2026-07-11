@@ -237,6 +237,9 @@
     Labels are placed at each part's center point in every view. Parts
     hidden behind other geometry still get a label there.
   </p>
+  <div class="color_row" style="margin-top:10px;">
+    <label><input type="checkbox" id="show_hidden_lines_cb"> Show hidden lines (full wireframe, ignores what's blocked from view)</label>
+  </div>
 </div>
 
 <div class="section hidden" id="generate_section">
@@ -285,6 +288,7 @@ function applyGlobalPrefs(prefs) {
   document.getElementById('rotation_deg_input').value = prefs.rotation_deg || 0;
   document.getElementById('output_format_select').value = prefs.output_format || 'png';
   document.getElementById('label_parts_cb').checked = !!prefs.label_parts;
+  document.getElementById('show_hidden_lines_cb').checked = !!prefs.show_hidden_lines;
   document.getElementById('keep_uploads_cb').checked = !!prefs.keep_uploads;
 }
 
@@ -422,6 +426,7 @@ function generate() {
     rotation_deg: parseFloat(document.getElementById('rotation_deg_input').value) || 0,
     output_format: document.getElementById('output_format_select').value,
     label_parts: document.getElementById('label_parts_cb').checked,
+    show_hidden_lines: document.getElementById('show_hidden_lines_cb').checked,
     keep_uploads: document.getElementById('keep_uploads_cb').checked,
   };
 

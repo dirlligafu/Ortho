@@ -300,12 +300,12 @@ def _smooth_closed_contour(coords, iterations=2):
 
 
 def render_view(mesh, view_name, center, half_span, dist, axis_cfg,
-                 resolution=1800, n_samples=30, depth_eps=0.018,
+                 resolution=1800, n_samples=30, depth_eps=None,
                  crease_angle_deg=25.0, ao_mesh=None, ao_levels=9,
                  min_contour_area=60, ao_blur_sigma_px=1.4,
                  ao_mode=None, ao_max_darkness=0.5,
                  smooth_contours=True, smooth_iterations=1,
-                 contour_supersample=4):
+                 contour_supersample=4, show_hidden_lines=False):
     """Renders one orthographic view of mesh, returning a dict with:
         outer_contours: list of Nx2 pixel-space silhouette contours
         ao_raster: (gray uint8 array, alpha bool mask) for AO shading as a
@@ -323,8 +323,24 @@ def render_view(mesh, view_name, center, half_span, dist, axis_cfg,
     ao_mode: None (no AO), "vertex" (use ao_mesh's baked vertex colors), or
     "ssao" (screen-space AO computed directly from THIS view's own depth
     buffer — no ao_mesh needed, genuinely per-view, recomputed every call).
+
+    depth_eps: tolerance (world units) used by compute_visible_edges() to
+    decide whether an edge sample is at the same depth as the nearest
+    surface there (visible) or meaningfully behind it (hidden). Defaults to
+    None, which derives it from half_span instead of using a fixed number --
+    a fixed absolute default breaks down for models exported at a very
+    different unit scale than the "normal-size car" it was tuned for (e.g.
+    a whole model just a few centimeters across): the tolerance can end up
+    larger than the model itself, so the visibility test never hides
+    anything and interior geometry bleeds through as visible lines.
+
+    show_hidden_lines: if True, skips the occlusion test entirely and keeps
+    every feature/boundary edge regardless of what's in front of it (full
+    wireframe). The silhouette is still computed normally either way.
     """
     znear, zfar = 0.01, dist * 2.2
+    if depth_eps is None:
+        depth_eps = half_span * 0.0075
     eye, up = _view_geometry(view_name, center, dist, axis_cfg)
 
     # Feature edges (dihedral angle) + true mesh boundaries. On fragmented
@@ -343,7 +359,14 @@ def render_view(mesh, view_name, center, half_span, dist, axis_cfg,
     except Exception:
         edges_v = np.empty((0, 2), dtype=int)
 
-    if len(edges_v) > 0:
+    if show_hidden_lines:
+        # Still need a depth render for the silhouette, just not for edge
+        # visibility -- every feature/boundary edge is kept as-is.
+        depth_raw, pose, cam = render_depth(mesh_welded, eye, center, up, half_span, half_span,
+                                              resolution=resolution, znear=znear, zfar=zfar)
+        depth_true = pyrender_depth_to_true_distance(depth_raw, znear, zfar)
+        segs = list(zip(mesh_welded.vertices[edges_v[:, 0]], mesh_welded.vertices[edges_v[:, 1]])) if len(edges_v) > 0 else []
+    elif len(edges_v) > 0:
         segs, depth_true, pose, cam = compute_visible_edges(
             mesh_welded, edges_v, eye, center, up, half_span, half_span,
             resolution=resolution, n_samples=n_samples, znear=znear, zfar=zfar, depth_eps=depth_eps

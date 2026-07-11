@@ -122,6 +122,7 @@ DEFAULT_GLOBAL_PREFS = {
     "front_flip": False,
     "output_format": "png",
     "label_parts": False,
+    "show_hidden_lines": False,
     "ao_mode": "ssao",
     "keep_uploads": False,
 }
@@ -301,6 +302,7 @@ def generate():
             front_flip = bool(data.get("front_flip", False))
             rotation_deg = float(data.get("rotation_deg", 0) or 0)
             label_parts = bool(data.get("label_parts", False))
+            show_hidden_lines = bool(data.get("show_hidden_lines", False))
             keep_uploads = bool(data.get("keep_uploads", False))
             # "vertex" (fast: per-vertex baked AO, can look blocky on large
             # flat panels) or "ssao" (default: screen-space AO computed
@@ -324,6 +326,7 @@ def generate():
                 "ao": ao_enabled, "ao_darkness": ao_darkness, "up_axis": up_axis,
                 "front_flip": front_flip, "rotation_deg": rotation_deg,
                 "output_format": output_format, "label_parts": label_parts,
+                "show_hidden_lines": show_hidden_lines,
                 "ao_mode": ao_mode, "keep_uploads": keep_uploads,
             })
 
@@ -396,6 +399,7 @@ def generate():
                     resolution=render_res, ao_mesh=ao_mesh,
                     ao_mode=(ao_mode if ao_enabled else None),
                     ao_max_darkness=ao_darkness / 100.0,
+                    show_hidden_lines=show_hidden_lines,
                 )
                 if part_centroids:
                     r = view_results[v]
