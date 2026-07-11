@@ -721,6 +721,8 @@ function loadPreview(sessionId, ext) {
   const onLoad = (root) => {
     modelGroup = new THREE.Group();
     modelGroup.add(root);
+    let partIndex = 0;
+    modelGroup.traverse(obj => { if (obj.isMesh) obj.name = allPartNames[partIndex++] ?? obj.name; });
     applyDefaultMaterial(modelGroup);
     addEdges(modelGroup);
     scene.add(modelGroup);
