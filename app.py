@@ -62,12 +62,14 @@ _check_dependencies()
 import os
 import json
 import uuid
+import tempfile
+import zipfile
 
 from flask import Flask, request, render_template, jsonify, send_from_directory, Response, stream_with_context
 
 from model_loader import load_model, build_filtered_mesh, ModelLoadError, SUPPORTED_EXTENSIONS, load_model_from_zip, remap_part_face_ranges
 from renderer import get_model_scale, detect_front_axis, render_view, render_rib_sections, render_longitudinal_section, AxisConfig, compute_ambient_occlusion, rotate_mesh_around_up_axis, compute_part_centroids, project_part_labels, AOPerformanceError, finalize_ssao_views, compute_directional_shading
-from compositor import compose_image
+from compositor import compose_image, export_split_views
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
@@ -254,7 +256,7 @@ def generate():
     if session_id not in _MODEL_CACHE:
         return jsonify({"error": "Session expired or invalid. Please re-upload the file."}), 400
 
-    def _event(msg, progress, done=False, image_url=None, error=None):
+    def _event(msg, progress, done=False, image_url=None, error=None, zip_url=None):
         import json as _json
         payload = {"message": msg, "progress": progress}
         if done:
@@ -263,6 +265,8 @@ def generate():
             payload["image_url"] = image_url
         if error:
             payload["error"] = error
+        if zip_url:
+            payload["zip_url"] = zip_url
         return f"data: {_json.dumps(payload)}\n\n"
 
     def stream():
@@ -282,6 +286,7 @@ def generate():
             include_rib = data.get("include_rib", False)
             rib_cuts = max(1, int(data.get("rib_cuts", 1)))
             include_longitudinal = bool(data.get("include_longitudinal", False))
+            split_views = data.get("split_views", False)
             bg_color = data.get("bg_color", "#FFFFFF")
             line_color = data.get("line_color", "#000000")
             scale_pct = int(data.get("scale_pct", 100))
@@ -434,7 +439,25 @@ def generate():
                 model_name=model_display_name,
                 part_numbers=(part_numbers if label_parts else None),
             )
-            yield _event("Done.", 1.0, done=True, image_url=f"/outputs/{out_name}")
+            zip_url = None
+            if split_views and view_results:
+                zip_name = f"{uuid.uuid4()}.zip"
+                zip_path = os.path.join(OUTPUT_DIR, zip_name)
+                base_name = os.path.splitext(filename)[0]
+                with tempfile.TemporaryDirectory() as tmp:
+                    up_idx = axis_cfg.axis_index(axis_cfg.up_axis)
+                    rib_y_center = -center[up_idx] * rib_ppm
+                    saved = export_split_views(
+                        view_results, tmp, base_name,
+                        rib_sections=rib_sections, rib_ppm=rib_ppm,
+                        rib_y_center=rib_y_center,
+                        bg_color=bg_color, line_color=line_color, scale_pct=scale_pct,
+                    )
+                    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                        for view_name, img_path in saved.items():
+                            zf.write(img_path, f"{view_name}.png")
+                zip_url = f"/outputs/{zip_name}"
+            yield _event("Done.", 1.0, done=True, image_url=f"/outputs/{out_name}", zip_url=zip_url)
 
         except Exception as e:
             yield _event("", 0, error=f"Render failed: {e}")

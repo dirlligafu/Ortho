@@ -5,6 +5,7 @@ which fights aspect-equal scaling across panels of different aspect ratios —
 confirmed during earlier development).
 """
 
+import os
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
@@ -165,14 +166,20 @@ def _draw_view(ax, result, bbox, line_color, bg_color="#FFFFFF",
         # pixel regardless of where along the axis it actually is), so a
         # cut position has no meaningful line to draw there at all —
         # callers simply don't pass markers for those views.
-        for frac in (rib_marker_x_fracs or []):
+        for frac, num in (rib_marker_x_fracs or []):
             x = xmin + frac * (xmax - xmin)
             ax.plot([x, x], [ymin, ymax], linestyle=(0, (2, 4)), linewidth=0.5,
                     color=line_color, alpha=0.35, zorder=1, solid_capstyle="butt")
-        for frac in (rib_marker_y_fracs or []):
+            if num is not None:
+                ax.text(x, ymin + (ymax - ymin) * 0.02, f"S{num}", ha="center", va="top",
+                        fontsize=18 * cs, family="DejaVu Sans", color=line_color, alpha=0.85, zorder=1)
+        for frac, num in (rib_marker_y_fracs or []):
             y = ymin + frac * (ymax - ymin)
             ax.plot([xmin, xmax], [y, y], linestyle=(0, (2, 4)), linewidth=0.5,
                     color=line_color, alpha=0.35, zorder=1, solid_capstyle="butt")
+            if num is not None:
+                ax.text(xmin + (xmax - xmin) * 0.01, y, f"S{num}", ha="left", va="center",
+                        fontsize=18 * cs, family="DejaVu Sans", color=line_color, alpha=0.85, zorder=1)
 
     outer_segs = [np.column_stack([c[:, 1], c[:, 0]]) for c in result["outer_contours"]]
     if outer_segs:
@@ -263,10 +270,10 @@ RIB_MAX_PER_ROW = 2  # user-requested cap: keeps rib rows close to a
 # axis — there is no meaningful line to draw on those two views, and they
 # are simply absent from this map on purpose, not by oversight.
 _RIB_MARKER_AXIS = {
-    "left":   ("x", False),  # frac=0 -> left edge,  frac=1 -> right edge
-    "right":  ("x", True),   # frac=0 -> right edge, frac=1 -> left edge (mirrored vs "left")
-    "top":    ("y", False),  # frac=0 -> top edge,   frac=1 -> bottom edge
-    "bottom": ("y", True),   # frac=0 -> bottom edge, frac=1 -> top edge (mirrored vs "top")
+    "left":   ("x", True),   # xmin=z_lo=rear; mirrored so S1 appears at front (high-Z side)
+    "right":  ("x", False),  # xmin=z_hi=front; not mirrored so S1 appears at front (low-frac=xmin)
+    "top":    ("y", False),  # ymin=z_hi=front; not mirrored so S1 appears at front
+    "bottom": ("y", True),   # ymin=z_lo=rear;  mirrored so S1 appears at front
 }
 
 # Which views show a meaningful marker line for the longitudinal (side-axis)
@@ -517,8 +524,8 @@ def compose_image(view_results, rib_sections, rib_ppm, output_path,
                     content_span = (nb[1] - nb[0]) if axis_kind == "x" else (nb[3] - nb[2])
                     padded_span  = (padded[1] - padded[0]) if axis_kind == "x" else (padded[3] - padded[2])
                     fracs_for_view = [
-                        0.5 + ((1 - f if mirrored else f) - 0.5) * content_span / padded_span
-                        for f in rib_fracs
+                        (0.5 + ((1 - f if mirrored else f) - 0.5) * content_span / padded_span, i + 1)
+                        for i, f in enumerate(rib_fracs)
                     ]
                 else:
                     fracs_for_view = []
@@ -526,7 +533,7 @@ def compose_image(view_results, rib_sections, rib_ppm, output_path,
                 x_fracs = fracs_for_view if axis_kind == "x" else []
                 y_fracs = fracs_for_view if axis_kind == "y" else []
                 if has_longitudinal and name in _LONGITUDINAL_MARKER_VIEWS:
-                    x_fracs = x_fracs + [0.5]
+                    x_fracs = x_fracs + [(0.5, None)]
 
                 _draw_view(
                     ax, view_results[name], bboxes[name], line_color, bg_color,
@@ -642,3 +649,100 @@ def compose_image(view_results, rib_sections, rib_ppm, output_path,
     plt.savefig(output_path, dpi=dpi, facecolor=bg_color)
     plt.close(fig)
     return output_path
+
+
+def export_split_views(view_results, output_dir, base_name,
+                       rib_sections=None, rib_ppm=1.0,
+                       rib_y_center=None,
+                       bg_color="#FFFFFF", line_color="#000000",
+                       scale_pct=100, dpi_base=250):
+    """All images max_dim x max_dim, anchored on model world center."""
+    cs = max(0.1, min(1.0, scale_pct / 100.0))
+    pad_frac = 0.05
+
+    bboxes = {name: _view_used_bbox(result, pad_frac=0.0)
+              for name, result in view_results.items()}
+
+    def _span(name, axis):
+        if name not in bboxes:
+            return 0.0
+        b = bboxes[name]
+        return (b[1] - b[0]) if axis == "x" else (b[3] - b[2])
+
+    W = max(_span("front", "x"), _span("back", "x"), _span("top", "x"), _span("bottom", "x"), 1.0)
+    H = max(_span("front", "y"), _span("back", "y"), _span("left", "y"), _span("right", "y"), 1.0)
+    D = max(_span("left", "x"), _span("right", "x"), _span("top", "y"), _span("bottom", "y"), 1.0)
+
+    pad = max(W, H, D) * pad_frac
+    max_dim = max(W, H, D) + 2 * pad
+
+    rib_fracs = rib_cut_fractions(len(rib_sections)) if rib_sections else []
+
+    saved = {}
+    for name, result in view_results.items():
+        if name not in {"front", "back", "left", "right", "top", "bottom"}:
+            continue
+        bbox = bboxes[name]
+        cx = (bbox[0] + bbox[1]) / 2
+        cy = (bbox[2] + bbox[3]) / 2
+        square_bbox = (cx - max_dim / 2, cx + max_dim / 2,
+                       cy - max_dim / 2, cy + max_dim / 2)
+
+        axis_kind, mirrored = _RIB_MARKER_AXIS.get(name, (None, False))
+        if axis_kind and rib_fracs:
+            content_span = (bboxes[name][1] - bboxes[name][0]) if axis_kind == "x" \
+                else (bboxes[name][3] - bboxes[name][2])
+            fracs = [(0.5 + ((1 - f if mirrored else f) - 0.5) * content_span / max_dim, i + 1)
+                     for i, f in enumerate(rib_fracs)]
+        else:
+            fracs = []
+
+        fig = plt.figure(figsize=(max_dim / 100 * cs, max_dim / 100 * cs),
+                         dpi=dpi_base, facecolor=bg_color)
+        ax = fig.add_axes([0, 0, 1, 1])
+        ax.set_facecolor(bg_color)
+        _draw_view(ax, result, square_bbox, line_color, bg_color,
+                   rib_marker_x_fracs=(fracs if axis_kind == "x" else None),
+                   rib_marker_y_fracs=(fracs if axis_kind == "y" else None))
+
+        out_path = os.path.join(output_dir, f"{base_name}_{name}.png")
+        plt.savefig(out_path, dpi=dpi_base, facecolor=bg_color)
+        plt.close(fig)
+        saved[name] = out_path
+
+    if rib_sections:
+        all_xs, all_ys = [], []
+        for segs in rib_sections:
+            for p0, p1 in segs:
+                all_xs += [p0[0] * rib_ppm, p1[0] * rib_ppm]
+                all_ys += [-p0[1] * rib_ppm, -p1[1] * rib_ppm]
+        if all_xs:
+            rib_cx = (min(all_xs) + max(all_xs)) / 2
+            rib_cy = rib_y_center if rib_y_center is not None \
+                else (min(all_ys) + max(all_ys)) / 2
+        else:
+            rib_cx = 0.0
+            rib_cy = rib_y_center if rib_y_center is not None else 0.0
+
+        section_bbox = (rib_cx - max_dim / 2, rib_cx + max_dim / 2,
+                        rib_cy - max_dim / 2, rib_cy + max_dim / 2)
+
+        for i, segs in enumerate(rib_sections):
+            if not segs:
+                continue
+            num = i + 1
+            xmin, xmax, ymin, ymax = section_bbox
+            fig = plt.figure(figsize=(max_dim / 100 * cs, max_dim / 100 * cs),
+                             dpi=dpi_base, facecolor=bg_color)
+            ax = fig.add_axes([0, 0, 1, 1])
+            ax.set_facecolor(bg_color)
+            _draw_rib(ax, segs, rib_ppm, section_bbox, line_color)
+            ax.text(xmin + (xmax - xmin) * 0.01, ymin + (ymax - ymin) * 0.02,
+                    f"SECTION {num}", ha="left", va="top",
+                    fontsize=20 * cs, family="DejaVu Sans", color=line_color, alpha=0.7, zorder=3)
+            out_path = os.path.join(output_dir, f"{base_name}_section_{num}.png")
+            plt.savefig(out_path, dpi=dpi_base, facecolor=bg_color)
+            plt.close(fig)
+            saved[f"section_{num}"] = out_path
+
+    return saved
