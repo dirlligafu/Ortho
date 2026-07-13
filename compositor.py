@@ -424,7 +424,22 @@ def compose_image(view_results, rib_sections, rib_ppm, output_path,
                 w_v, h_v = sizes[name]
                 ax = add_axes_px(x_cursor, y_cursor, w_v, view_row_h)
                 axis_kind, mirrored = _RIB_MARKER_AXIS.get(name, (None, False))
-                fracs_for_view = [(1 - f if mirrored else f) for f in rib_fracs] if axis_kind else []
+                if axis_kind and rib_fracs:
+                    # bboxes[name] includes 5% padding on each side; raw fracs
+                    # applied to the padded span place cut lines at the wrong
+                    # pixel — the outermost intervals appear narrower than the
+                    # interior ones. Remap fracs so each line lands on the
+                    # correct content pixel regardless of padding.
+                    padded = bboxes[name]
+                    nb = _view_used_bbox(view_results[name], pad_frac=0.0)
+                    content_span = (nb[1] - nb[0]) if axis_kind == "x" else (nb[3] - nb[2])
+                    padded_span  = (padded[1] - padded[0]) if axis_kind == "x" else (padded[3] - padded[2])
+                    fracs_for_view = [
+                        0.5 + ((1 - f if mirrored else f) - 0.5) * content_span / padded_span
+                        for f in rib_fracs
+                    ]
+                else:
+                    fracs_for_view = []
                 _draw_view(
                     ax, view_results[name], bboxes[name], line_color, bg_color,
                     label=(name.upper() if show_chrome else None),
