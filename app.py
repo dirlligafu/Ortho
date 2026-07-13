@@ -70,6 +70,7 @@ from flask import Flask, request, render_template, jsonify, send_from_directory,
 from model_loader import load_model, build_filtered_mesh, ModelLoadError, SUPPORTED_EXTENSIONS, load_model_from_zip, remap_part_face_ranges
 from renderer import get_model_scale, detect_front_axis, render_view, render_rib_sections, render_longitudinal_section, AxisConfig, compute_ambient_occlusion, rotate_mesh_around_up_axis, compute_part_centroids, project_part_labels, AOPerformanceError, finalize_ssao_views, compute_directional_shading
 from compositor import compose_image, export_split_views
+from blender_export import compute_plane_specs, render_script
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
@@ -287,6 +288,7 @@ def generate():
             rib_cuts = max(1, int(data.get("rib_cuts", 1)))
             include_longitudinal = bool(data.get("include_longitudinal", False))
             split_views = data.get("split_views", False)
+            include_blender_script = data.get("include_blender_script", False)
             bg_color = data.get("bg_color", "#FFFFFF")
             line_color = data.get("line_color", "#000000")
             scale_pct = int(data.get("scale_pct", 100))
@@ -456,6 +458,9 @@ def generate():
                     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
                         for view_name, img_path in saved.items():
                             zf.write(img_path, f"{view_name}.png")
+                        if include_blender_script:
+                            plane_specs = compute_plane_specs(saved.keys(), layout)
+                            zf.writestr("build_reference_scene.py", render_script(plane_specs))
                 zip_url = f"/outputs/{zip_name}"
             yield _event("Done.", 1.0, done=True, image_url=f"/outputs/{out_name}", zip_url=zip_url)
 
