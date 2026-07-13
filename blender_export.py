@@ -73,7 +73,12 @@ def compute_plane_specs(saved_keys, layout):
         name = f"section_{i + 1}"
         if name not in saved_keys:
             continue
-        x = -half_d + frac * (2 * half_d)
+        # render_rib_sections() (renderer.py) always reorders its output so
+        # section_1 is nearest front and section_N nearest back, regardless
+        # of the model's own forward-axis sign. rib_fracs stays a plain
+        # increasing 0..1 sequence, so section_1 (smallest frac) must map
+        # to the front end (+half_d), not the back end.
+        x = half_d - frac * (2 * half_d)
         specs.append({
             "name": name,
             "filename": f"{name}.png",
