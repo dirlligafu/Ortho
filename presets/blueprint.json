@@ -1,0 +1,13 @@
+{
+  "name": "Blueprint",
+  "bg_color": "#1B2E4E",
+  "line_color": "#FFFFFF",
+  "chrome_style": "cartouche",
+  "cartouche_fields": [
+    { "label": "Software", "value": "Ortho" },
+    { "label": "Version",  "value": "0.12" },
+    { "label": "Date",     "value": "{date}" },
+	{ "label": "", "value": "" },
+    { "label": "Author",  "value": "Mathmathou" }
+  ]
+}

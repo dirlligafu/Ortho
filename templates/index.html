@@ -178,7 +178,14 @@
     </label>
   </div>
 
-  <h2 style="margin-top:20px;">4. Colors</h2>
+  <h2 style="margin-top:20px;">4. Colors &amp; Template</h2>
+  <div class="color_row" style="margin-bottom:8px;">
+    <label>Template
+      <select id="template_select" style="margin-left:4px;font-size:1em;background:var(--input_bg);color:var(--text);border:1px solid var(--input_border);border-radius:4px;padding:1px 4px;">
+        <option value="">Custom</option>
+      </select>
+    </label>
+  </div>
   <div class="color_row">
     <div class="preset_btn" style="background:#fff;border:2px solid #000;" onclick="setColors('#FFFFFF','#000000')" title="White background, black lines"></div>
     <div class="preset_btn" style="background:#000;border:2px solid #fff;" onclick="setColors('#000000','#FFFFFF')" title="Black background, white lines"></div>
@@ -263,10 +270,22 @@ const fileInput = document.getElementById('file_input');
 // load and apply them to the controls, so they're remembered across visits
 // regardless of which file gets loaded next (explicitly requested as
 // GLOBAL, unlike the per-file part selections).
+let _presets = [];
+
 function applyGlobalPrefs(prefs) {
   document.querySelectorAll('.view_cb').forEach(cb => {
     cb.checked = prefs.views.includes(cb.value);
   });
+  if (prefs.presets && prefs.presets.length) {
+    _presets = prefs.presets;
+    const sel = document.getElementById('template_select');
+    prefs.presets.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p.name;
+      opt.textContent = p.name;
+      sel.appendChild(opt);
+    });
+  }
   document.getElementById('rib_cb').checked = !!prefs.include_rib;
   document.getElementById('rib_cuts_slider').value = prefs.rib_cuts || 1;
   document.getElementById('rib_cuts_val').textContent = prefs.rib_cuts || 1;
@@ -292,6 +311,15 @@ fetch('/preferences')
   .then(r => r.json())
   .then(prefs => applyGlobalPrefs(prefs))
   .catch(() => {});  // non-fatal if this fails; controls just keep their defaults
+
+document.getElementById('template_select').addEventListener('change', e => {
+  const name = e.target.value;
+  const preset = _presets.find(p => p.name === name);
+  if (preset) {
+    if (preset.bg_color) document.getElementById('bg_color').value = preset.bg_color;
+    if (preset.line_color) document.getElementById('line_color').value = preset.line_color;
+  }
+});
 
 dropZone.addEventListener('click', () => fileInput.click());
 dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
@@ -411,6 +439,7 @@ function generate() {
     views: views,
     include_rib: includeRib,
     rib_cuts: parseInt(document.getElementById('rib_cuts_slider').value),
+    template_name: document.getElementById('template_select').value || null,
     bg_color: document.getElementById('bg_color').value,
     line_color: document.getElementById('line_color').value,
     scale_pct: parseInt(document.getElementById('scale_slider').value),

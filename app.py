@@ -60,6 +60,7 @@ def _check_dependencies():
 _check_dependencies()
 
 import os
+import glob
 import json
 import uuid
 
@@ -75,6 +76,22 @@ UPLOAD_TMP_DIR = os.path.join(UPLOAD_DIR, "_tmp")
 OUTPUT_DIR = os.path.join(BASE_DIR, "outputs")
 SELECTIONS_DIR = os.path.join(BASE_DIR, "selections")
 GLOBAL_PREFS_PATH = os.path.join(BASE_DIR, "global_prefs.json")
+PRESETS_DIR = os.path.join(BASE_DIR, "presets")
+
+def _load_presets():
+    presets = {}
+    if not os.path.isdir(PRESETS_DIR):
+        return presets
+    for path in sorted(glob.glob(os.path.join(PRESETS_DIR, "*.json"))):
+        try:
+            with open(path, encoding="utf-8") as f:
+                p = json.load(f)
+            presets[p["name"]] = p
+        except Exception:
+            pass
+    return presets
+
+_PRESETS = _load_presets()
 for d in (UPLOAD_DIR, OUTPUT_DIR, SELECTIONS_DIR, UPLOAD_TMP_DIR):
     os.makedirs(d, exist_ok=True)
 # Clear any leftover temp uploads from a previous run that didn't get to
@@ -150,7 +167,12 @@ def _save_global_prefs(prefs):
 
 @app.route("/preferences", methods=["GET"])
 def get_preferences():
-    return jsonify(_load_global_prefs())
+    prefs = _load_global_prefs()
+    prefs["presets"] = [
+        {"name": p["name"], "bg_color": p.get("bg_color"), "line_color": p.get("line_color")}
+        for p in _PRESETS.values()
+    ]
+    return jsonify(prefs)
 
 
 @app.route("/")
@@ -280,8 +302,10 @@ def generate():
             views = data.get("views", ["front", "back", "left", "top"])
             include_rib = data.get("include_rib", False)
             rib_cuts = max(1, int(data.get("rib_cuts", 1)))
-            bg_color = data.get("bg_color", "#FFFFFF")
-            line_color = data.get("line_color", "#000000")
+            template_name = data.get("template_name")
+            template = _PRESETS.get(template_name) if template_name else None
+            bg_color = (template or {}).get("bg_color", data.get("bg_color", "#FFFFFF"))
+            line_color = (template or {}).get("line_color", data.get("line_color", "#000000"))
             scale_pct = int(data.get("scale_pct", 100))
             ao_enabled = bool(data.get("ao", False))
             ao_darkness = max(0, min(100, int(data.get("ao_darkness", 50))))
@@ -425,6 +449,7 @@ def generate():
                 bg_color=bg_color, line_color=line_color, scale_pct=scale_pct,
                 model_name=model_display_name,
                 part_numbers=(part_numbers if label_parts else None),
+                template=template,
             )
             yield _event("Done.", 1.0, done=True, image_url=f"/outputs/{out_name}")
 

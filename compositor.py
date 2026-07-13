@@ -255,10 +255,58 @@ LABEL_GAP_PX = 10  # px, fixed gap between a view/rib panel's bottom edge and
                    # under every panel regardless of how tall it is.
 
 
+def _draw_cartouche(overlay, canvas_w, header_h, model_name, line_color, cs, inset, template):
+    """Draws a blueprint-style title block: a labelled table on the left,
+    model name on the right. Fields are defined in the template JSON."""
+    from datetime import date as _date
+    today = _date.today().strftime("%Y-%m-%d")
+
+    fields = template.get("cartouche_fields", [])
+    if not fields:
+        return
+
+    cart_w = min(canvas_w * 0.38, 340 * cs)
+    cart_x = inset
+    cart_y = inset
+    cart_h = header_h - inset * 1.5
+    n = len(fields)
+    row_h = cart_h / n
+    label_col_w = cart_w * 0.38
+
+    overlay.add_patch(plt.Rectangle(
+        (cart_x, cart_y), cart_w, cart_h,
+        fill=False, edgecolor=line_color, linewidth=0.8 * cs, zorder=5,
+    ))
+    for i, field in enumerate(fields):
+        y = cart_y + i * row_h
+        if i > 0:
+            overlay.plot([cart_x, cart_x + cart_w], [y, y],
+                         color=line_color, linewidth=0.8 * cs, zorder=5)
+        overlay.plot([cart_x + label_col_w, cart_x + label_col_w], [y, y + row_h],
+                     color=line_color, linewidth=0.8 * cs, zorder=5)
+        label = field.get("label", "")
+        value = field.get("value", "").replace("{date}", today)
+        mid_y = y + row_h * 0.5
+        pad = 6 * cs
+        overlay.text(cart_x + pad, mid_y, label,
+                     ha="left", va="center", fontsize=10 * cs,
+                     family="DejaVu Sans", color=line_color, alpha=0.7, zorder=5)
+        overlay.text(cart_x + label_col_w + pad, mid_y, value,
+                     ha="left", va="center", fontsize=11 * cs,
+                     family="DejaVu Sans", color=line_color, zorder=5)
+
+    if model_name:
+        right_cx = cart_x + cart_w + (canvas_w - inset - cart_x - cart_w) * 0.5
+        overlay.text(right_cx, header_h * 0.48, model_name,
+                     ha="center", va="center", fontsize=38 * cs,
+                     family="DejaVu Sans", color=line_color, zorder=5)
+
+
 def compose_image(view_results, rib_sections, rib_ppm, output_path,
                    bg_color="#FFFFFF", line_color="#000000",
                    scale_pct=100, dpi_base=250,
-                   model_name=None, show_chrome=True, part_numbers=None):
+                   model_name=None, show_chrome=True, part_numbers=None,
+                   template=None):
     """view_results: dict of {view_name: render_view() result}, only for
     views the user actually requested.
     rib_sections: list of rib cuts, each a list of (p0,p1) segment pairs
@@ -489,13 +537,17 @@ def compose_image(view_results, rib_sections, rib_ppm, output_path,
             fill=False, edgecolor=line_color, linewidth=BORDER_LW * cs, zorder=5,
         ))
 
-        if model_name:
-            overlay.text(canvas_w / 2, header_h * 0.40, model_name,
-                         ha="center", va="center", fontsize=40 * cs, family="DejaVu Sans",
-                         color=line_color, zorder=5)
-            overlay.text(canvas_w / 2, header_h * 0.72, "Made in Ortho 0.12 by 6wheel",
-                         ha="center", va="center", fontsize=22 * cs, family="DejaVu Sans",
-                         color=line_color, alpha=0.75, zorder=5)
+        chrome_style = (template or {}).get("chrome_style", "centered")
+        if chrome_style == "cartouche":
+            _draw_cartouche(overlay, canvas_w, header_h, model_name, line_color, cs, inset, template)
+        else:
+            if model_name:
+                overlay.text(canvas_w / 2, header_h * 0.40, model_name,
+                             ha="center", va="center", fontsize=40 * cs, family="DejaVu Sans",
+                             color=line_color, zorder=5)
+                overlay.text(canvas_w / 2, header_h * 0.72, "Made in Ortho 0.12 by 6wheel",
+                             ha="center", va="center", fontsize=22 * cs, family="DejaVu Sans",
+                             color=line_color, alpha=0.75, zorder=5)
 
         # Watermark text: GitHub link stays bottom-right (as before);
         # YouTube link added bottom-left, both offset by the same
