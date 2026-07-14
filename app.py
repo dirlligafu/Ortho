@@ -448,11 +448,16 @@ def generate():
                 base_name = os.path.splitext(filename)[0]
                 with tempfile.TemporaryDirectory() as tmp:
                     up_idx = axis_cfg.axis_index(axis_cfg.up_axis)
+                    side_idx = axis_cfg.axis_index(axis_cfg.side_axis)
+                    forward_idx = axis_cfg.axis_index(axis_cfg.forward_axis)
                     rib_y_center = -center[up_idx] * rib_ppm
+                    rib_x_center = center[side_idx] * rib_ppm
+                    long_x_center = center[forward_idx] * rib_ppm
                     saved, layout = export_split_views(
                         view_results, tmp, base_name, axis_cfg,
                         rib_sections=rib_sections, rib_ppm=rib_ppm,
-                        rib_y_center=rib_y_center, longitudinal_segments=longitudinal_segments,
+                        rib_y_center=rib_y_center, rib_x_center=rib_x_center,
+                        long_x_center=long_x_center, longitudinal_segments=longitudinal_segments,
                         bg_color=bg_color, line_color=line_color, scale_pct=scale_pct,
                     )
                     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
