@@ -12,6 +12,7 @@ Dernière mise à jour : 2026-07-14. Commité sur les branches de travail en cou
 | `fix-hidden-line-depth-eps-scale` | oui | #7 | Tolérance de lignes cachées relative à l'échelle du modèle + bascule wireframe |
 | `fix-rib-marker-position` | oui | #11 | Correction du décalage de padding sur les traits de coupe (1er/dernier trait) |
 | `fix-obj-ngon-triangulation` | oui | #12 | Triangulation des faces quad/n-gon à l'import OBJ |
+| `fix-compositor-axis-hardcoding` | oui | #13 | Correction des indices d'axes en dur dans les panneaux de coupe pour `up_axis` non standard |
 | `template-presets` | oui | **non retenue volontairement** | Système de gabarits JSON, cartouche façon plan technique |
 | `split-view-export` | oui (juste le découpage d'images) | **non, en attente de #2** | Export ZIP images séparées par vue + coupes |
 | `blender-reference-script` | **non, local uniquement** | — | Script Blender auto-généré (positionnement 3D, collection dédiée), basé sur `split-view-export` |
@@ -21,7 +22,7 @@ Dernière mise à jour : 2026-07-14. Commité sur les branches de travail en cou
 
 | Fichier | Branches qui le touchent |
 |---|---|
-| `compositor.py` | section-markers, fix-rib-marker-position, template-presets, split-view-export, blender-reference-script, longitudinal-section |
+| `compositor.py` | section-markers, fix-rib-marker-position, fix-compositor-axis-hardcoding, template-presets, split-view-export, blender-reference-script, longitudinal-section |
 | `app.py` | section-markers, fix-hidden-line-depth-eps-scale, template-presets, split-view-export, blender-reference-script, longitudinal-section |
 | `templates/index.html` | quasiment toutes les branches |
 | `renderer.py` | fix-hidden-line-depth-eps-scale, longitudinal-section |
@@ -46,8 +47,17 @@ Concrètement : #2 et #11 vont se percuter l'une l'autre en amont dès que l'une
 
 - `template-presets` ajoute un paramètre pour le gabarit/cartouche
 - `longitudinal-section` ajoute `axis_cfg` (obligatoire) et `longitudinal_segments`
+- `fix-compositor-axis-hardcoding` (#13) ajoute aussi `axis_cfg` (obligatoire) — c'est la même chose que `longitudinal-section`, extraite dans sa propre PR (voir conversation du 2026-07-14)
 
-Ces deux branches vont aussi se percuter sur la ligne de signature elle-même.
+Ces branches vont aussi se percuter sur la ligne de signature elle-même.
+
+### 3. `axis_cfg` devient obligatoire dans `compose_image()` (nouveau, depuis #13)
+
+Une fois #13 mergée en amont, **tout appelant** de `compose_image()` doit lui passer `axis_cfg`, pas seulement `longitudinal-section` qui l'avait déjà anticipé. Concrètement :
+- `template-presets` ne le passe pas aujourd'hui — son propre appel à `compose_image()` cassera (décalage d'arguments positionnels) une fois #13 mergée, à corriger en même temps que la fusion de sa signature avec celle de `longitudinal-section` (zone 2 ci-dessus).
+- `split-view-export`/`blender-reference-script` : `export_split_views()` a le même genre d'appel à `_draw_rib()` avec l'ancienne signature (voir le bug silencieux n°1 du RETEX plus bas) — la correction de ce point (le "point 3" discuté le 2026-07-14 : exporter la coupe longitudinale comme image séparée) doit de toute façon faire transiter `axis_cfg` jusqu'à `export_split_views()`, donc ce chantier et #13 sont liés.
+
+Ce n'était pas un problème avant #13 puisque `axis_cfg` n'existait nulle part dans `compose_image()`.
 
 ## Ordre de merge recommandé
 
@@ -66,6 +76,8 @@ Ces deux branches vont aussi se percuter sur la ligne de signature elle-même.
 5. **`blender-reference-script`** reste derrière `split-view-export` (elle en dépend directement) — à rebaser/proposer une fois que `split-view-export` est mergée ou au moins stable.
 
 6. **`template-presets`** : au-delà du chevauchement avec `longitudinal-section` sur la signature de `compose_image()` (facile à résoudre, deux nouveaux paramètres indépendants), elle reste retenue pour une autre raison (pas sûr que l'approche te convienne / convienne au mainteneur) — à traiter séparément, pas de contrainte d'ordre technique forte avec les autres.
+
+7. **`fix-compositor-axis-hardcoding` (#13)** : indépendante, sans risque, peut être mergée n'importe quand (aucune des autres branches ne touche `_draw_rib`/`_rib_used_bbox` au-delà des deux appels déjà existants dans `compose_image()`). Vu qu'elle contient exactement le même correctif que `longitudinal-section` avait déjà en interne, **`longitudinal-section` et `blender-reference-script` sont en train d'être rebasées dessus dès maintenant** (2026-07-14), sans attendre le merge amont — on retire leur copie devenue redondante du correctif, et on garde uniquement leurs ajouts propres.
 
 ## Points à surveiller
 
