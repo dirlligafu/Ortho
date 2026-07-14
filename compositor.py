@@ -653,21 +653,23 @@ def compose_image(view_results, rib_sections, rib_ppm, output_path,
 
 def export_split_views(view_results, output_dir, base_name, axis_cfg,
                        rib_sections=None, rib_ppm=1.0,
-                       rib_y_center=None,
+                       rib_y_center=None, longitudinal_segments=None,
                        bg_color="#FFFFFF", line_color="#000000",
                        scale_pct=100, dpi_base=250):
     """All images max_dim x max_dim, anchored on model world center.
 
-    axis_cfg: required, same reasoning as compose_image() -- the rib cut
-    panels project world coordinates onto pixel axes that depend on which
-    axis was cut, so a caller can't be allowed to omit it and silently get
-    the default-case (0, 1) indices.
+    axis_cfg: required, same reasoning as compose_image() -- the rib/
+    longitudinal cut panels project world coordinates onto pixel axes that
+    depend on which axis was cut, so a caller can't be allowed to omit it
+    and silently get the default-case (0, 1) indices.
     """
     cs = max(0.1, min(1.0, scale_pct / 100.0))
     pad_frac = 0.05
 
     rib_h_idx = axis_cfg.axis_index(axis_cfg.side_axis)
     rib_v_idx = axis_cfg.axis_index(axis_cfg.up_axis)
+    long_h_idx = axis_cfg.axis_index(axis_cfg.forward_axis)
+    long_v_idx = axis_cfg.axis_index(axis_cfg.up_axis)
 
     bboxes = {name: _view_used_bbox(result, pad_frac=0.0)
               for name, result in view_results.items()}
@@ -753,5 +755,26 @@ def export_split_views(view_results, output_dir, base_name, axis_cfg,
             plt.savefig(out_path, dpi=dpi_base, facecolor=bg_color)
             plt.close(fig)
             saved[f"section_{num}"] = out_path
+
+    if longitudinal_segments:
+        all_xs = [p[long_h_idx] * rib_ppm for p0, p1 in longitudinal_segments for p in (p0, p1)]
+        all_ys = [-p[long_v_idx] * rib_ppm for p0, p1 in longitudinal_segments for p in (p0, p1)]
+        long_cx = (min(all_xs) + max(all_xs)) / 2
+        long_cy = rib_y_center if rib_y_center is not None else (min(all_ys) + max(all_ys)) / 2
+        long_bbox = (long_cx - max_dim / 2, long_cx + max_dim / 2,
+                     long_cy - max_dim / 2, long_cy + max_dim / 2)
+        xmin, xmax, ymin, ymax = long_bbox
+        fig = plt.figure(figsize=(max_dim / 100 * cs, max_dim / 100 * cs),
+                         dpi=dpi_base, facecolor=bg_color)
+        ax = fig.add_axes([0, 0, 1, 1])
+        ax.set_facecolor(bg_color)
+        _draw_rib(ax, longitudinal_segments, rib_ppm, long_bbox, long_h_idx, long_v_idx, line_color)
+        ax.text(xmin + (xmax - xmin) * 0.01, ymin + (ymax - ymin) * 0.02,
+                "LONGITUDINAL SECTION", ha="left", va="top",
+                fontsize=20 * cs, family="DejaVu Sans", color=line_color, alpha=0.7, zorder=3)
+        out_path = os.path.join(output_dir, f"{base_name}_longitudinal.png")
+        plt.savefig(out_path, dpi=dpi_base, facecolor=bg_color)
+        plt.close(fig)
+        saved["longitudinal"] = out_path
 
     return saved

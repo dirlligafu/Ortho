@@ -450,7 +450,7 @@ def generate():
                     saved = export_split_views(
                         view_results, tmp, base_name, axis_cfg,
                         rib_sections=rib_sections, rib_ppm=rib_ppm,
-                        rib_y_center=rib_y_center,
+                        rib_y_center=rib_y_center, longitudinal_segments=longitudinal_segments,
                         bg_color=bg_color, line_color=line_color, scale_pct=scale_pct,
                     )
                     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
