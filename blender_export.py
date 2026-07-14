@@ -24,6 +24,16 @@ _VIEW_ROTATIONS_DEG = {
 _SECTION_ROTATION_DEG = _VIEW_ROTATIONS_DEG["front"]  # sections cut
     # perpendicular to the same depth axis front/back cap.
 
+# The longitudinal section cuts perpendicular to the side axis, so by the
+# same reasoning as _SECTION_ROTATION_DEG above it should share a rotation
+# with whichever of left/right caps that axis -- except unlike front/back
+# (which happen to share one identical rotation), left and right have
+# DIFFERENT rotations in the table above, so this pick is a best-effort
+# guess (left, not right), NOT verified against a real hand-built .blend.
+# Flip to _VIEW_ROTATIONS_DEG["right"] if a real render shows the
+# longitudinal plane mirrored/backwards in Blender.
+_LONGITUDINAL_ROTATION_DEG = _VIEW_ROTATIONS_DEG["left"]
+
 # UNCONFIRMED sign — the one hand-built reference example was left/right
 # symmetric, so this was never actually tested. Flip to -1 if visual
 # verification against a real, asymmetric render shows it's backwards.
@@ -84,6 +94,18 @@ def compute_plane_specs(saved_keys, layout):
             "filename": f"{name}.png",
             "location": (x, 0, 0),
             "rotation_deg": _SECTION_ROTATION_DEG,
+        })
+
+    if "longitudinal" in saved_keys:
+        # Always the exact side-axis midpoint (see render_longitudinal_section),
+        # so unlike rib sections there's no fraction to place it at -- it
+        # simply sits at the origin along the side axis, same as a rib
+        # section at frac=0.5 would.
+        specs.append({
+            "name": "longitudinal",
+            "filename": "longitudinal.png",
+            "location": (0, 0, 0),
+            "rotation_deg": _LONGITUDINAL_ROTATION_DEG,
         })
 
     return specs
