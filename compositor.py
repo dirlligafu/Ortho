@@ -55,6 +55,25 @@ def _rib_used_bbox(rib_segments, ppm, h_idx, v_idx, pad_frac=0.05):
     return xs.min() - pad, xs.max() + pad, ys.min() - pad, ys.max() + pad
 
 
+def _world_to_panel_x_frac(world_coord, ppm, bbox):
+    """Converts a single world-space coordinate (already known to be
+    along whichever axis is horizontal on this panel) into a 0..1
+    fraction of the panel's own (already padded) bbox -- for placing a
+    cross-reference marker showing where a *different* cut intersects
+    this one. Exact, not an approximation: unlike the orthographic-view
+    marker fracs (which reuse rib_cut_fractions() under the assumption
+    that a view's content spans the mesh's full extent along that axis,
+    true by construction for a full silhouette view), an individual
+    rib/longitudinal panel's own content span can be narrower or
+    off-center relative to the mesh's overall bounds, so this works
+    directly off that panel's own already-computed bbox instead."""
+    xmin, xmax = bbox[0], bbox[1]
+    span = xmax - xmin
+    if span == 0:
+        return 0.5
+    return (world_coord * ppm - xmin) / span
+
+
 def _draw_part_labels(ax, part_labels, part_numbers, bbox, line_color, bg_color, cs=1.0):
     """Draws a small numbered marker (filled circle + number) at each
     part's projected position in this view. part_labels: {name: (px, py)}
@@ -193,7 +212,8 @@ def _draw_view(ax, result, bbox, line_color, bg_color="#FFFFFF",
                 clip_on=False)
 
 
-def _draw_rib(ax, rib_segments, ppm, bbox, h_idx, v_idx, line_color, lw=1.0):
+def _draw_rib(ax, rib_segments, ppm, bbox, h_idx, v_idx, line_color, lw=1.0,
+              marker_x_fracs=None):
     """Same batching fix as _draw_view, applied to rib/cross-section
     segments — these can also number in the thousands on fragmented
     meshes and would hit the identical per-Line2D overhead otherwise.
@@ -201,13 +221,26 @@ def _draw_rib(ax, rib_segments, ppm, bbox, h_idx, v_idx, line_color, lw=1.0):
     h_idx/v_idx: which world-axis index (0=x,1=y,2=z) of each 3D segment
     point to plot as horizontal/vertical. The two axes left over after a
     cut differ depending on which axis was cut (forward for rib sections,
-    side for the longitudinal section), so this can't be hardcoded."""
+    side for the longitudinal section), so this can't be hardcoded.
+
+    marker_x_fracs: optional list of 0..1 fractions of THIS panel's own
+    (already padded) bbox at which to draw a faint vertical dashed line —
+    used to cross-reference where a *different* cut intersects this one
+    (e.g. showing each rib cut's position on the longitudinal panel, and
+    the longitudinal cut's position on each rib panel). Every cut this
+    module draws happens to be perpendicular to whatever axis is
+    horizontal on its own panel, so only x-fracs are ever needed here,
+    unlike _draw_view's x/y pair."""
     if rib_segments:
         segs = np.array([[[p0[h_idx] * ppm, -p0[v_idx] * ppm], [p1[h_idx] * ppm, -p1[v_idx] * ppm]]
                           for p0, p1 in rib_segments])
         ax.add_collection(LineCollection(segs, colors=line_color, linewidths=lw,
                                           capstyle="round", joinstyle="round"))
     xmin, xmax, ymin, ymax = bbox
+    for frac in (marker_x_fracs or []):
+        x = xmin + frac * (xmax - xmin)
+        ax.plot([x, x], [ymin, ymax], linestyle=(0, (2, 4)), linewidth=0.5,
+                color=line_color, alpha=0.35, zorder=1, solid_capstyle="butt")
     ax.set_xlim(xmin, xmax)
     ax.set_ylim(ymax, ymin)
     ax.set_aspect("equal")
@@ -508,7 +541,15 @@ def compose_image(view_results, rib_sections, rib_ppm, output_path,
             for n, i in enumerate(row["indices"]):
                 w_r, h_r = rib_sizes[i]
                 ax = add_axes_px(x_cursor, y_cursor, w_r, view_row_h)
-                _draw_rib(ax, rib_sections[i], rib_ppm, rib_bboxes[i], rib_h_idx, rib_v_idx, line_color)
+                # Cross-reference marker: where the longitudinal cut (a
+                # fixed world position along the side axis, same value for
+                # every one of its segment points) falls on THIS rib panel.
+                cross_fracs = []
+                if has_longitudinal:
+                    long_world_pos = longitudinal_segments[0][0][rib_h_idx]
+                    cross_fracs = [_world_to_panel_x_frac(long_world_pos, rib_ppm, rib_bboxes[i])]
+                _draw_rib(ax, rib_sections[i], rib_ppm, rib_bboxes[i], rib_h_idx, rib_v_idx, line_color,
+                          marker_x_fracs=cross_fracs)
                 if show_chrome:
                     ax.text(0.5, label_yfrac, f"SECTION {i + 1}", transform=ax.transAxes, ha="center", va="top",
                             fontsize=18 * cs, family="DejaVu Sans", color=line_color, alpha=0.85, clip_on=False)
@@ -516,7 +557,16 @@ def compose_image(view_results, rib_sections, rib_ppm, output_path,
         elif row["kind"] == "longitudinal":
             w_r, h_r = long_size
             ax = add_axes_px(x_cursor, y_cursor, w_r, view_row_h)
-            _draw_rib(ax, longitudinal_segments, rib_ppm, long_bbox, long_h_idx, long_v_idx, line_color)
+            # Cross-reference markers: where each rib cut (a fixed world
+            # position along the forward axis) falls on the longitudinal
+            # panel. Cuts that missed all geometry (empty segment list)
+            # have no meaningful position and are skipped.
+            cross_fracs = [
+                _world_to_panel_x_frac(segs[0][0][long_h_idx], rib_ppm, long_bbox)
+                for segs in rib_sections if segs
+            ]
+            _draw_rib(ax, longitudinal_segments, rib_ppm, long_bbox, long_h_idx, long_v_idx, line_color,
+                      marker_x_fracs=cross_fracs)
             if show_chrome:
                 ax.text(0.5, label_yfrac, "LONGITUDINAL SECTION", transform=ax.transAxes, ha="center", va="top",
                         fontsize=18 * cs, family="DejaVu Sans", color=line_color, alpha=0.85, clip_on=False)
