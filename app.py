@@ -66,7 +66,7 @@ import uuid
 from flask import Flask, request, render_template, jsonify, send_from_directory, Response, stream_with_context
 
 from model_loader import load_model, build_filtered_mesh, ModelLoadError, SUPPORTED_EXTENSIONS, load_model_from_zip, remap_part_face_ranges
-from renderer import get_model_scale, detect_front_axis, render_view, render_rib_sections, AxisConfig, compute_ambient_occlusion, rotate_mesh_around_up_axis, compute_part_centroids, project_part_labels, AOPerformanceError, finalize_ssao_views, compute_directional_shading
+from renderer import get_model_scale, detect_front_axis, render_view, render_rib_sections, render_longitudinal_section, AxisConfig, compute_ambient_occlusion, rotate_mesh_around_up_axis, compute_part_centroids, project_part_labels, AOPerformanceError, finalize_ssao_views, compute_directional_shading
 from compositor import compose_image
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -110,6 +110,7 @@ DEFAULT_GLOBAL_PREFS = {
     "views": ["front", "back", "left", "top"],
     "include_rib": False,
     "rib_cuts": 1,
+    "include_longitudinal": False,
     "bg_color": "#FFFFFF",
     "line_color": "#000000",
     "scale_pct": 100,
@@ -280,6 +281,7 @@ def generate():
             views = data.get("views", ["front", "back", "left", "top"])
             include_rib = data.get("include_rib", False)
             rib_cuts = max(1, int(data.get("rib_cuts", 1)))
+            include_longitudinal = bool(data.get("include_longitudinal", False))
             bg_color = data.get("bg_color", "#FFFFFF")
             line_color = data.get("line_color", "#000000")
             scale_pct = int(data.get("scale_pct", 100))
@@ -320,6 +322,7 @@ def generate():
 
             _save_global_prefs({
                 "views": views, "include_rib": include_rib, "rib_cuts": rib_cuts,
+                "include_longitudinal": include_longitudinal,
                 "bg_color": bg_color, "line_color": line_color, "scale_pct": scale_pct,
                 "ao": ao_enabled, "ao_darkness": ao_darkness, "up_axis": up_axis,
                 "front_flip": front_flip, "rotation_deg": rotation_deg,
@@ -411,10 +414,14 @@ def generate():
 
             rib_sections = []
             rib_ppm = 1.0
-            if include_rib:
+            longitudinal_segments = None
+            if include_rib or include_longitudinal:
                 yield _event("Computing cross-sections…", 0.87)
-                rib_sections = render_rib_sections(filtered, axis_cfg, n_cuts=rib_cuts)
                 rib_ppm = render_res / (half_span * 2)
+                if include_rib:
+                    rib_sections = render_rib_sections(filtered, axis_cfg, n_cuts=rib_cuts)
+                if include_longitudinal:
+                    longitudinal_segments = render_longitudinal_section(filtered, axis_cfg)
 
             yield _event("Composing final image…", 0.93)
             out_name = f"{uuid.uuid4()}.{output_format}"
@@ -422,7 +429,7 @@ def generate():
             model_display_name = os.path.splitext(filename)[0] or None
             compose_image(
                 view_results, rib_sections, rib_ppm, out_path,
-                axis_cfg,
+                axis_cfg, longitudinal_segments=longitudinal_segments,
                 bg_color=bg_color, line_color=line_color, scale_pct=scale_pct,
                 model_name=model_display_name,
                 part_numbers=(part_numbers if label_parts else None),

@@ -199,11 +199,9 @@ def _draw_rib(ax, rib_segments, ppm, bbox, h_idx, v_idx, line_color, lw=1.0):
     meshes and would hit the identical per-Line2D overhead otherwise.
 
     h_idx/v_idx: which world-axis index (0=x,1=y,2=z) of each 3D segment
-    point to plot as horizontal/vertical. Only correct as a hardcoded
-    (0,1) pair for the default up_axis="y"/forward_axis="z" config --
-    for any other up_axis choice the two axes left over after a cut are
-    a different pair, so this must be computed by the caller instead of
-    assumed here."""
+    point to plot as horizontal/vertical. The two axes left over after a
+    cut differ depending on which axis was cut (forward for rib sections,
+    side for the longitudinal section), so this can't be hardcoded."""
     if rib_segments:
         segs = np.array([[[p0[h_idx] * ppm, -p0[v_idx] * ppm], [p1[h_idx] * ppm, -p1[v_idx] * ppm]]
                           for p0, p1 in rib_segments])
@@ -263,7 +261,7 @@ LABEL_GAP_PX = 10  # px, fixed gap between a view/rib panel's bottom edge and
 
 
 def compose_image(view_results, rib_sections, rib_ppm, output_path,
-                   axis_cfg,
+                   axis_cfg, longitudinal_segments=None,
                    bg_color="#FFFFFF", line_color="#000000",
                    scale_pct=100, dpi_base=250,
                    model_name=None, show_chrome=True, part_numbers=None):
@@ -282,6 +280,16 @@ def compose_image(view_results, rib_sections, rib_ppm, output_path,
     large cut count doesn't tank per-slice resolution on the page.
     rib_ppm: pixels-per-world-unit scale factor for rib cuts (must match
     the same scale used for the orthographic views, for true relative size).
+    axis_cfg: the AxisConfig the mesh was rendered with. Required (no
+    default) because rib_sections/longitudinal_segments are cut along
+    different axes and this is what determines which world-axis indices
+    of each 3D segment point are the correct pair to plot as
+    horizontal/vertical for each — the two hardcoded to (0,1) before this
+    was added, which was only correct by coincidence for the default
+    up_axis="y"/forward_axis="z" config (see _rib_used_bbox/_draw_rib).
+    longitudinal_segments: flat (p0,p1) segment list for the single
+    midpoint cut perpendicular to the side axis (renderer.
+    render_longitudinal_section), or None/empty if not requested.
     scale_pct: output resolution scale, 25-100 (matches UI slider). Note
     this same scale_pct is what app.py used to compute view_results'
     render resolution (base_res * scale_pct/100) BEFORE calling this
@@ -324,6 +332,8 @@ def compose_image(view_results, rib_sections, rib_ppm, output_path,
 
     rib_h_idx = axis_cfg.axis_index(axis_cfg.side_axis)
     rib_v_idx = axis_cfg.axis_index(axis_cfg.up_axis)
+    long_h_idx = axis_cfg.axis_index(axis_cfg.forward_axis)
+    long_v_idx = axis_cfg.axis_index(axis_cfg.up_axis)
 
     rib_bboxes = []
     rib_sizes = []
@@ -334,6 +344,11 @@ def compose_image(view_results, rib_sections, rib_ppm, output_path,
             rib_bboxes.append(bbox)
             rib_sizes.append((bbox[1] - bbox[0], bbox[3] - bbox[2]))
     rib_fracs = rib_cut_fractions(len(rib_sections)) if has_rib else []
+
+    has_longitudinal = bool(longitudinal_segments)
+    if has_longitudinal:
+        long_bbox = _rib_used_bbox(longitudinal_segments, rib_ppm, long_h_idx, long_v_idx)
+        long_size = (long_bbox[1] - long_bbox[0], long_bbox[3] - long_bbox[2])
 
     # rows: list of dicts describing what to draw and where. Each row is
     # either a "views" row (one or more named orthographic views side by
@@ -378,6 +393,12 @@ def compose_image(view_results, rib_sections, rib_ppm, output_path,
             row_h = max(s[1] for s in chunk_sizes) + LABEL_H
             row_w = sum(s[0] for s in chunk_sizes) + GAP * (len(chunk_sizes) - 1)
             rows.append({"kind": "rib", "indices": chunk_idx, "height": row_h, "width": row_w})
+
+    if has_longitudinal:
+        # Same placement rationale as rib rows above: not an orthographic
+        # view, appended after everything else including rib cuts.
+        w, h = long_size
+        rows.append({"kind": "longitudinal", "height": h + LABEL_H, "width": w})
 
     if not rows:
         raise ValueError("No views selected to render.")
@@ -460,6 +481,14 @@ def compose_image(view_results, rib_sections, rib_ppm, output_path,
                     ax.text(0.5, label_yfrac, f"SECTION {i + 1}", transform=ax.transAxes, ha="center", va="top",
                             fontsize=18 * cs, family="DejaVu Sans", color=line_color, alpha=0.85, clip_on=False)
                 x_cursor += w_r + GAP
+        elif row["kind"] == "longitudinal":
+            w_r, h_r = long_size
+            ax = add_axes_px(x_cursor, y_cursor, w_r, view_row_h)
+            _draw_rib(ax, longitudinal_segments, rib_ppm, long_bbox, long_h_idx, long_v_idx, line_color)
+            if show_chrome:
+                ax.text(0.5, label_yfrac, "LONGITUDINAL SECTION", transform=ax.transAxes, ha="center", va="top",
+                        fontsize=18 * cs, family="DejaVu Sans", color=line_color, alpha=0.85, clip_on=False)
+            x_cursor += w_r + GAP
         y_cursor += row_h + GAP
 
     if legend_names:
