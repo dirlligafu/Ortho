@@ -72,3 +72,47 @@ Ces deux branches vont aussi se percuter sur la ligne de signature elle-même.
 - Ne jamais laisser le mainteneur tomber sur un de ces conflits via le bouton merge de GitHub — toujours rebaser proactivement soi-même en amont.
 - Avant d'ouvrir une nouvelle PR, revérifier ce fichier : si une branche dont elle dépend a été mergée entre-temps, la rebase d'abord.
 - Ce fichier est à mettre à jour à la main (ou à me redemander de le faire) à chaque fois qu'une PR est mergée en amont ou qu'une nouvelle branche est créée.
+
+## RETEX : test d'intégration complet (2026-07-14)
+
+Objectif : valider que la roadmap ci-dessus tient la route, et obtenir une version locale complète simulant "tout accepté" (les 6 PR ouvertes + `template-presets` + `split-view-export` + `blender-reference-script` + `longitudinal-section`).
+
+### Étapes suivies
+
+Branche jetable `test-full-integration` créée depuis `main`, jamais poussée, fusion une branche à la fois dans l'ordre recommandé ci-dessus :
+
+1. `fix-part-count-on-individual-toggle` (#5)
+2. `fix-obj-ngon-triangulation` (#12)
+3. `fix-hidden-line-depth-eps-scale` (#7)
+4. `three-js-preview` (#3)
+5. `section-markers` (#2)
+6. `fix-rib-marker-position` (#11)
+7. `split-view-export`
+8. `blender-reference-script`
+9. `longitudinal-section`
+10. `template-presets`
+
+Après chaque étape sensible (les points 5 à 10), vérification que l'appli s'importe encore (`python -c "import app"`) avant de continuer. Test complet en conditions réelles (serveur lancé, génération via l'API) une fois toutes les branches fusionnées.
+
+### Intégrations réussies sans aucun conflit
+
+Les étapes 1 à 4 et l'étape 8 (`blender-reference-script`, puisqu'elle part directement de `split-view-export` déjà fusionnée) se sont fusionnées automatiquement, sans aucune intervention manuelle.
+
+### Adaptations nécessaires pour les collisions prévues
+
+**Zone 1 : la ligne `fracs_for_view`.** Rencontrée deux fois, comme prévu :
+- Entre `section-markers` et `fix-rib-marker-position` : combiné en gardant la structure en tuples `(frac, num)` de `section-markers`, avec la formule de correction de padding de `fix-rib-marker-position` appliquée au premier élément du tuple.
+- Entre le résultat ci-dessus et `split-view-export` : `split-view-export` avait sa propre version déjà combinée, mais sans respecter la préférence `label_sections` (elle numérotait toujours en dur). Résolution : garder la version qui respecte la préférence, plus complète.
+- Et une troisième fois avec `longitudinal-section`, qui ajoutait la logique de fusion `x_fracs`/`y_fracs` pour son propre marqueur de coupe centrale. Ici, une vraie erreur aurait été possible : la logique de `longitudinal-section` ajoutait `[0.5]` (un float brut) à une liste censée contenir des tuples `(frac, num)`, ce qui aurait cassé le dépaquetage `for frac, num in ...` dans `_draw_view`. Corrigé en ajoutant `(0.5, None)` à la place.
+
+**Zone 2 : la signature de `compose_image()`.** Entre `longitudinal-section` (`axis_cfg`, `longitudinal_segments`) et `template-presets` (`template`) : simple ajout des deux nouveaux paramètres côte à côte, aucune vraie difficulté.
+
+### Les deux bugs silencieux détectés
+
+1. **Confirmé et corrigé** : `export_split_views()` (ajoutée par `split-view-export`) appelait encore `_draw_rib()` avec l'ancienne signature à 4 arguments positionnels (`ax, segs, ppm, bbox, line_color`), alors que `longitudinal-section` avait rendu `h_idx`/`v_idx` obligatoires dans cette fonction. Sans correction, `line_color` (une chaîne de caractères) aurait été passé à la place de `h_idx` (un indice d'axe), ce qui aurait planté ou produit un rendu incohérent. **Aucun conflit git ne l'a signalé**, puisque cette ligne précise n'avait été modifiée par aucune des deux branches — seule sa dépendance (la signature de la fonction appelée) avait changé. Corrigé a minima en passant `h_idx=0, v_idx=1` en dur (comportement identique à avant la généralisation).
+
+2. **Limitation préexistante découverte, non corrigée (hors périmètre)** : en creusant le point 1, `export_split_views()` s'est révélée avoir le même défaut que `compose_image()` avait avant sa propre correction (par `longitudinal-section`) — elle suppose en dur que les indices d'axes 0/1 sont les bons partout dans son propre code (voir son calcul de bbox pour les sections, lignes ~713-714), sans jamais consulter `axis_cfg`. Elle n'a jamais reçu le même correctif. Concrètement : pour un modèle avec `up_axis` différent de la config par défaut (Y), les images de sections individuelles exportées par `split-view-export`/`blender-reference-script` seraient mal projetées, alors que l'image composite principale, elle, serait déjà correcte. À corriger dans un futur ticket dédié (threading `axis_cfg` à travers `export_split_views`), pas traité ici pour rester dans le périmètre du test d'intégration.
+
+### Verdict
+
+La roadmap de merge ci-dessus est validée : les points de friction sont exactement ceux identifiés à l'avance, aucune surprise structurelle. Le seul imprévu (le bug silencieux n°1) est le genre de problème qu'un simple `git merge` sans tests ne peut pas attraper puisqu'aucun conflit n'est levé — bon rappel de toujours tester l'appli réellement après une fusion, pas seulement vérifier l'absence de conflits.
