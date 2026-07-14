@@ -126,7 +126,15 @@ def _image_dir():
         "and the PNGs, then run again.")
 
 
-def _make_image_plane(name, image_path, location, rotation_deg):
+def _get_or_create_collection(name):
+    coll = bpy.data.collections.get(name)
+    if coll is None:
+        coll = bpy.data.collections.new(name)
+        bpy.context.scene.collection.children.link(coll)
+    return coll
+
+
+def _make_image_plane(name, image_path, location, rotation_deg, collection):
     mesh = bpy.data.meshes.new(name + "_mesh")
     verts = [(-0.5, -0.5, 0), (0.5, -0.5, 0), (0.5, 0.5, 0), (-0.5, 0.5, 0)]
     mesh.from_pydata(verts, [], [[0, 1, 2, 3]])
@@ -139,7 +147,7 @@ def _make_image_plane(name, image_path, location, rotation_deg):
     obj = bpy.data.objects.new(name, mesh)
     obj.location = location
     obj.rotation_euler = tuple(math.radians(d) for d in rotation_deg)
-    bpy.context.collection.objects.link(obj)
+    collection.objects.link(obj)
 
     mat = bpy.data.materials.new(name + "_mat")
     mat.use_nodes = True
@@ -159,13 +167,14 @@ def _make_image_plane(name, image_path, location, rotation_deg):
 
 def main():
     img_dir = _image_dir()
+    collection = _get_or_create_collection("Ortho References")
     built = 0
     for spec in PLANES:
         path = os.path.join(img_dir, spec["filename"])
         if not os.path.exists(path):
             print(f"[skip] missing image: {{path}}")
             continue
-        _make_image_plane(spec["name"], path, spec["location"], spec["rotation_deg"])
+        _make_image_plane(spec["name"], path, spec["location"], spec["rotation_deg"], collection)
         built += 1
     print(f"Built {{built}} reference plane(s).")
     if built == 0:
