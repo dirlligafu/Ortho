@@ -14,9 +14,9 @@ Dernière mise à jour : 2026-07-14. Commité sur les branches de travail en cou
 | `fix-obj-ngon-triangulation` | oui | #12 | Triangulation des faces quad/n-gon à l'import OBJ |
 | `fix-compositor-axis-hardcoding` | oui | #13 | Correction des indices d'axes en dur dans les panneaux de coupe pour `up_axis` non standard |
 | `template-presets` | oui | **non retenue volontairement** | Système de gabarits JSON, cartouche façon plan technique |
-| `split-view-export` | oui (juste le découpage d'images) | **non, en attente de #2** | Export ZIP images séparées par vue + coupes |
-| `blender-reference-script` | **non, local uniquement** | — | Script Blender auto-généré (positionnement 3D, collection dédiée), basé sur `split-view-export` |
-| `longitudinal-section` | **non, local uniquement** | — | Nouvelle coupe centrale (axe gauche/droite) dans l'image composite, indépendante des deux ci-dessus |
+| `split-view-export` | oui | **non, en attente de #2** | Export ZIP images séparées par vue + coupes. **Depuis le 2026-07-14, rebasée sur `longitudinal-section` (voir note ci-dessous) : n'est plus indépendante de la coupe longitudinale.** |
+| `blender-reference-script` | oui | — | Script Blender auto-généré (positionnement 3D, collection dédiée), basé sur `split-view-export` |
+| `longitudinal-section` | oui | — | Nouvelle coupe centrale (axe gauche/droite) dans l'image composite |
 
 ## Qui touche quoi (`compositor.py` est la zone chaude)
 
@@ -59,6 +59,12 @@ Une fois #13 mergée en amont, **tout appelant** de `compose_image()` doit lui p
 
 Ce n'était pas un problème avant #13 puisque `axis_cfg` n'existait nulle part dans `compose_image()`.
 
+### 4. `split-view-export` dépend maintenant de `longitudinal-section` (nouveau, depuis le 2026-07-14)
+
+Pour combler les 4 manques ci-dessous (section "Prochain chantier"), `split-view-export` avait besoin à la fois du correctif #13 (`h_idx`/`v_idx` généralisés) et de toute la logique de coupe longitudinale (`axis_cfg`, `longitudinal_segments`, `render_longitudinal_section`). Plutôt que de dupliquer cette logique en interne (risque de divergence, voir la mésaventure `fracs_for_view` en zone 1), `split-view-export` a été rebasée directement sur `longitudinal-section` (qui contenait déjà #13 par sa propre rebase antérieure), puis `blender-reference-script` a suivi par-dessus.
+
+**Conséquence sur la stratégie de PR** : `split-view-export` n'est plus proposable en amont indépendamment de `longitudinal-section` comme prévu initialement — elle en contient maintenant tout le diff. `longitudinal-section` doit être mergée en amont avant ou en même temps que `split-view-export`, pas après. Mettre à jour l'ordre de merge recommandé en conséquence le jour où ces PR seront effectivement ouvertes.
+
 ## Ordre de merge recommandé
 
 1. **D'abord, sans risque, dans n'importe quel ordre** : `fix-part-count-on-individual-toggle` (#5), `fix-obj-ngon-triangulation` (#12), `fix-hidden-line-depth-eps-scale` (#7), `three-js-preview` (#3). Aucune ne touche la zone chaude de `compositor.py`.
@@ -67,19 +73,26 @@ Ce n'était pas un problème avant #13 puisque `axis_cfg` n'existait nulle part 
    - Rebase immédiatement l'autre (#11 si #2 est passée en premier) sur le nouveau `main`, en réconciliant à la main la ligne `fracs_for_view` (ajouter la correction de padding par-dessus les tuples déjà là, ou l'inverse). C'est toi qui fais ce travail, jamais le mainteneur.
 
 3. Une fois **#2 et #11 toutes les deux mergées** en amont :
-   - Rebase `split-view-export` sur le nouveau `main` : sa duplication (tuples + padding) devrait alors se résorber quasi automatiquement puisque `main` contient déjà les deux.
-   - Rebase `longitudinal-section` sur le nouveau `main` : retirer sa propre copie de la correction de padding (devenue redondante), ne garder que ses ajouts propres (nouvelle coupe, signature `compose_image`).
-   - Ouvre la PR de `split-view-export` à ce moment-là.
+   - Rebase `longitudinal-section` sur le nouveau `main` : retirer sa propre copie de la correction de padding (devenue redondante), ne garder que ses ajouts propres (nouvelle coupe, signature `compose_image`). Ouvre sa PR à ce moment-là.
+   - Une fois **`longitudinal-section` mergée en amont** (ou au moins stable et acceptée en principe), rebase `split-view-export` dessus (voir zone 4 ci-dessus — ce n'est plus une rebase sur `main` seul, `split-view-export` dépend maintenant vraiment de `longitudinal-section`). Ouvre la PR de `split-view-export` à ce moment-là.
 
-4. **`longitudinal-section`** peut être proposée en PR dès l'étape 3 terminée, indépendamment de `split-view-export`/`blender-reference-script`.
+4. **`longitudinal-section`** peut être proposée en PR dès l'étape 3 terminée. **Elle doit désormais passer avant `split-view-export`**, plus question d'ordre indépendant depuis que cette dernière en dépend (zone 4 ci-dessus).
 
-5. **`blender-reference-script`** reste derrière `split-view-export` (elle en dépend directement) — à rebaser/proposer une fois que `split-view-export` est mergée ou au moins stable.
+5. **`blender-reference-script`** reste derrière `split-view-export` (elle en dépend directement, transitivement aussi de `longitudinal-section`) — à rebaser/proposer une fois que `split-view-export` est mergée ou au moins stable.
 
 6. **`template-presets`** : au-delà du chevauchement avec `longitudinal-section` sur la signature de `compose_image()` (facile à résoudre, deux nouveaux paramètres indépendants), elle reste retenue pour une autre raison (pas sûr que l'approche te convienne / convienne au mainteneur) — à traiter séparément, pas de contrainte d'ordre technique forte avec les autres.
 
 7. **`fix-compositor-axis-hardcoding` (#13)** : indépendante, sans risque, peut être mergée n'importe quand (aucune des autres branches ne touche `_draw_rib`/`_rib_used_bbox` au-delà des deux appels déjà existants dans `compose_image()`). **Fait le 2026-07-14** : `longitudinal-section` rebasée dessus (un seul conflit à résoudre, retiré la copie redondante du correctif, testé en conditions réelles, poussée en force-with-lease). `blender-reference-script` n'avait pas eu besoin d'être rebasée dessus tant qu'elle partait de `split-view-export` seule (aucun conflit avec #13). **`split-view-export` a depuis été rebasée sur `longitudinal-section` (donc sur #13 aussi, transitivement) et `blender-reference-script` a suivi par-dessus (2026-07-14, voir "Prochain chantier" ci-dessous).**
 
-**Prochain chantier (en cours)** : implémenter les 4 manques identifiés le 2026-07-14 (marqueur longitudinal absent des images individuelles de `split-view-export`, pas de labels S1/S2 sur les traits croisés de la coupe longitudinale, coupe longitudinale absente du ZIP, absente du script Blender) — le point clé est de faire transiter `axis_cfg` jusqu'à `export_split_views()`, ce qui débloque presque tout le reste. Une fois fait, remettre à jour `test-full-integration` pour valider l'ensemble.
+**Prochain chantier : FAIT le 2026-07-14.** Les 4 manques identifiés le même jour sont tous implémentés et testés (mesh synthétique + un vrai passage par le serveur Flask, upload/génération/téléchargement du ZIP, script Blender rejoué en headless avec succès, 10 plans construits) :
+1. Marqueur de coupe longitudinale ajouté aux images individuelles front/back/top/bottom de `export_split_views()` — vérifié géométriquement correct même sur un mesh volontairement asymétrique (la bbox de contenu d'une vue orthographique coïncide toujours exactement avec l'étendue du mesh sur cet axe).
+2. Labels S1/S2 ajoutés aux traits croisés du panneau longitudinal (`_draw_rib` accepte maintenant des tuples `(frac, num)`, comme `_draw_view`).
+3. Coupe longitudinale exportée comme image individuelle (`longitudinal.png`) dans le ZIP.
+4. Plan longitudinal ajouté au script Blender généré. **Rotation non confirmée** (voir commentaire dans `blender_export.py` — c'est un choix par défaut emprunté à "left", pas vérifié contre un vrai `.blend` de référence comme les 6 rotations de vues l'ont été ; à vérifier visuellement dans Blender avec un modèle asymétrique réel).
+
+Au passage, un correctif de bug a aussi été nécessaire : `export_split_views()` appelait encore `_draw_rib()` avec son ancienne signature à 4 arguments (plantage garanti dès qu'un export split-view avec coupe était demandé) — commit séparé, voir historique de `blender-reference-script`.
+
+Reste à faire : remettre à jour `test-full-integration` pour valider l'ensemble (branche suivante de ce chantier).
 
 ## Points à surveiller
 
