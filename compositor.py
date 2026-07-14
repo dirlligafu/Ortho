@@ -703,18 +703,23 @@ def export_split_views(view_results, output_dir, base_name, axis_cfg,
         if axis_kind and rib_fracs:
             content_span = (bboxes[name][1] - bboxes[name][0]) if axis_kind == "x" \
                 else (bboxes[name][3] - bboxes[name][2])
-            fracs = [(0.5 + ((1 - f if mirrored else f) - 0.5) * content_span / max_dim, i + 1)
-                     for i, f in enumerate(rib_fracs)]
+            fracs_for_view = [(0.5 + ((1 - f if mirrored else f) - 0.5) * content_span / max_dim, i + 1)
+                               for i, f in enumerate(rib_fracs)]
         else:
-            fracs = []
+            fracs_for_view = []
+
+        x_fracs = fracs_for_view if axis_kind == "x" else []
+        y_fracs = fracs_for_view if axis_kind == "y" else []
+        if longitudinal_segments and name in _LONGITUDINAL_MARKER_VIEWS:
+            x_fracs = x_fracs + [(0.5, None)]
 
         fig = plt.figure(figsize=(max_dim / 100 * cs, max_dim / 100 * cs),
                          dpi=dpi_base, facecolor=bg_color)
         ax = fig.add_axes([0, 0, 1, 1])
         ax.set_facecolor(bg_color)
         _draw_view(ax, result, square_bbox, line_color, bg_color,
-                   rib_marker_x_fracs=(fracs if axis_kind == "x" else None),
-                   rib_marker_y_fracs=(fracs if axis_kind == "y" else None))
+                   rib_marker_x_fracs=(x_fracs or None),
+                   rib_marker_y_fracs=(y_fracs or None))
 
         out_path = os.path.join(output_dir, f"{base_name}_{name}.png")
         plt.savefig(out_path, dpi=dpi_base, facecolor=bg_color)
