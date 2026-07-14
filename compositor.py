@@ -220,7 +220,7 @@ def _draw_view(ax, result, bbox, line_color, bg_color="#FFFFFF",
 
 
 def _draw_rib(ax, rib_segments, ppm, bbox, h_idx, v_idx, line_color, lw=1.0,
-              marker_x_fracs=None):
+              marker_x_fracs=None, cs=1.0):
     """Same batching fix as _draw_view, applied to rib/cross-section
     segments — these can also number in the thousands on fragmented
     meshes and would hit the identical per-Line2D overhead otherwise.
@@ -230,12 +230,15 @@ def _draw_rib(ax, rib_segments, ppm, bbox, h_idx, v_idx, line_color, lw=1.0,
     cut differ depending on which axis was cut (forward for rib sections,
     side for the longitudinal section), so this can't be hardcoded.
 
-    marker_x_fracs: optional list of 0..1 fractions of THIS panel's own
-    (already padded) bbox at which to draw a faint vertical dashed line —
-    used to cross-reference where a *different* cut intersects this one
-    (e.g. showing each rib cut's position on the longitudinal panel, and
-    the longitudinal cut's position on each rib panel). Every cut this
-    module draws happens to be perpendicular to whatever axis is
+    marker_x_fracs: optional list of (frac, num) tuples, mirroring
+    _draw_view's rib_marker_x_fracs -- frac is 0..1 across THIS panel's own
+    (already padded) bbox at which to draw a faint vertical dashed line,
+    num is the S-number to print next to it (or None for an unlabeled
+    marker). Used to cross-reference where a *different* cut intersects
+    this one (e.g. showing each rib cut's position on the longitudinal
+    panel, and the longitudinal cut's position on each rib panel -- the
+    latter has nothing to number, hence num=None being allowed). Every cut
+    this module draws happens to be perpendicular to whatever axis is
     horizontal on its own panel, so only x-fracs are ever needed here,
     unlike _draw_view's x/y pair."""
     if rib_segments:
@@ -244,10 +247,13 @@ def _draw_rib(ax, rib_segments, ppm, bbox, h_idx, v_idx, line_color, lw=1.0,
         ax.add_collection(LineCollection(segs, colors=line_color, linewidths=lw,
                                           capstyle="round", joinstyle="round"))
     xmin, xmax, ymin, ymax = bbox
-    for frac in (marker_x_fracs or []):
+    for frac, num in (marker_x_fracs or []):
         x = xmin + frac * (xmax - xmin)
         ax.plot([x, x], [ymin, ymax], linestyle=(0, (2, 4)), linewidth=0.5,
                 color=line_color, alpha=0.35, zorder=1, solid_capstyle="butt")
+        if num is not None:
+            ax.text(x, ymin + (ymax - ymin) * 0.02, f"S{num}", ha="center", va="top",
+                    fontsize=18 * cs, family="DejaVu Sans", color=line_color, alpha=0.85, zorder=1)
     ax.set_xlim(xmin, xmax)
     ax.set_ylim(ymax, ymin)
     ax.set_aspect("equal")
@@ -554,9 +560,9 @@ def compose_image(view_results, rib_sections, rib_ppm, output_path,
                 cross_fracs = []
                 if has_longitudinal:
                     long_world_pos = longitudinal_segments[0][0][rib_h_idx]
-                    cross_fracs = [_world_to_panel_x_frac(long_world_pos, rib_ppm, rib_bboxes[i])]
+                    cross_fracs = [(_world_to_panel_x_frac(long_world_pos, rib_ppm, rib_bboxes[i]), None)]
                 _draw_rib(ax, rib_sections[i], rib_ppm, rib_bboxes[i], rib_h_idx, rib_v_idx, line_color,
-                          marker_x_fracs=cross_fracs)
+                          marker_x_fracs=cross_fracs, cs=cs)
                 if show_chrome:
                     ax.text(0.5, label_yfrac, f"SECTION {i + 1}", transform=ax.transAxes, ha="center", va="top",
                             fontsize=18 * cs, family="DejaVu Sans", color=line_color, alpha=0.85, clip_on=False)
@@ -569,11 +575,11 @@ def compose_image(view_results, rib_sections, rib_ppm, output_path,
             # panel. Cuts that missed all geometry (empty segment list)
             # have no meaningful position and are skipped.
             cross_fracs = [
-                _world_to_panel_x_frac(segs[0][0][long_h_idx], rib_ppm, long_bbox)
-                for segs in rib_sections if segs
+                (_world_to_panel_x_frac(segs[0][0][long_h_idx], rib_ppm, long_bbox), i + 1)
+                for i, segs in enumerate(rib_sections) if segs
             ]
             _draw_rib(ax, longitudinal_segments, rib_ppm, long_bbox, long_h_idx, long_v_idx, line_color,
-                      marker_x_fracs=cross_fracs)
+                      marker_x_fracs=cross_fracs, cs=cs)
             if show_chrome:
                 ax.text(0.5, label_yfrac, "LONGITUDINAL SECTION", transform=ax.transAxes, ha="center", va="top",
                         fontsize=18 * cs, family="DejaVu Sans", color=line_color, alpha=0.85, clip_on=False)
