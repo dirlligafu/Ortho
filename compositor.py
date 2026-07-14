@@ -651,14 +651,23 @@ def compose_image(view_results, rib_sections, rib_ppm, output_path,
     return output_path
 
 
-def export_split_views(view_results, output_dir, base_name,
+def export_split_views(view_results, output_dir, base_name, axis_cfg,
                        rib_sections=None, rib_ppm=1.0,
                        rib_y_center=None,
                        bg_color="#FFFFFF", line_color="#000000",
                        scale_pct=100, dpi_base=250):
-    """All images max_dim x max_dim, anchored on model world center."""
+    """All images max_dim x max_dim, anchored on model world center.
+
+    axis_cfg: required, same reasoning as compose_image() -- the rib cut
+    panels project world coordinates onto pixel axes that depend on which
+    axis was cut, so a caller can't be allowed to omit it and silently get
+    the default-case (0, 1) indices.
+    """
     cs = max(0.1, min(1.0, scale_pct / 100.0))
     pad_frac = 0.05
+
+    rib_h_idx = axis_cfg.axis_index(axis_cfg.side_axis)
+    rib_v_idx = axis_cfg.axis_index(axis_cfg.up_axis)
 
     bboxes = {name: _view_used_bbox(result, pad_frac=0.0)
               for name, result in view_results.items()}
@@ -714,8 +723,8 @@ def export_split_views(view_results, output_dir, base_name,
         all_xs, all_ys = [], []
         for segs in rib_sections:
             for p0, p1 in segs:
-                all_xs += [p0[0] * rib_ppm, p1[0] * rib_ppm]
-                all_ys += [-p0[1] * rib_ppm, -p1[1] * rib_ppm]
+                all_xs += [p0[rib_h_idx] * rib_ppm, p1[rib_h_idx] * rib_ppm]
+                all_ys += [-p0[rib_v_idx] * rib_ppm, -p1[rib_v_idx] * rib_ppm]
         if all_xs:
             rib_cx = (min(all_xs) + max(all_xs)) / 2
             rib_cy = rib_y_center if rib_y_center is not None \
@@ -736,7 +745,7 @@ def export_split_views(view_results, output_dir, base_name,
                              dpi=dpi_base, facecolor=bg_color)
             ax = fig.add_axes([0, 0, 1, 1])
             ax.set_facecolor(bg_color)
-            _draw_rib(ax, segs, rib_ppm, section_bbox, line_color)
+            _draw_rib(ax, segs, rib_ppm, section_bbox, rib_h_idx, rib_v_idx, line_color)
             ax.text(xmin + (xmax - xmin) * 0.01, ymin + (ymax - ymin) * 0.02,
                     f"SECTION {num}", ha="left", va="top",
                     fontsize=20 * cs, family="DejaVu Sans", color=line_color, alpha=0.7, zorder=3)

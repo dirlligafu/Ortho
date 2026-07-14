@@ -448,7 +448,7 @@ def generate():
                     up_idx = axis_cfg.axis_index(axis_cfg.up_axis)
                     rib_y_center = -center[up_idx] * rib_ppm
                     saved = export_split_views(
-                        view_results, tmp, base_name,
+                        view_results, tmp, base_name, axis_cfg,
                         rib_sections=rib_sections, rib_ppm=rib_ppm,
                         rib_y_center=rib_y_center,
                         bg_color=bg_color, line_color=line_color, scale_pct=scale_pct,
