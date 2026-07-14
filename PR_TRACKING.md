@@ -53,9 +53,9 @@ Ces branches vont aussi se percuter sur la ligne de signature elle-même.
 
 ### 3. `axis_cfg` devient obligatoire dans `compose_image()` (nouveau, depuis #13)
 
-Une fois #13 mergée en amont, **tout appelant** de `compose_image()` doit lui passer `axis_cfg`, pas seulement `longitudinal-section` qui l'avait déjà anticipé. Concrètement :
-- `template-presets` ne le passe pas aujourd'hui — son propre appel à `compose_image()` cassera (décalage d'arguments positionnels) une fois #13 mergée, à corriger en même temps que la fusion de sa signature avec celle de `longitudinal-section` (zone 2 ci-dessus).
-- `split-view-export`/`blender-reference-script` : `export_split_views()` a le même genre d'appel à `_draw_rib()` avec l'ancienne signature (voir le bug silencieux n°1 du RETEX plus bas) — la correction de ce point (le "point 3" discuté le 2026-07-14 : exporter la coupe longitudinale comme image séparée) doit de toute façon faire transiter `axis_cfg` jusqu'à `export_split_views()`, donc ce chantier et #13 sont liés.
+Une fois #13 mergée en amont, **tout appelant** de `compose_image()` doit lui passer `axis_cfg`. **`longitudinal-section` est déjà rebasée sur #13 (fait le 2026-07-14, testé, poussée avec force-with-lease)** — plus rien à faire de ce côté. Restent :
+- `template-presets` : ne le passe pas encore — son propre appel à `compose_image()` cassera (décalage d'arguments positionnels) une fois #13 mergée, à corriger en même temps que la fusion de sa signature avec celle de `longitudinal-section` (zone 2 ci-dessus). Pas encore fait.
+- `split-view-export`/`blender-reference-script` : `export_split_views()` a le même genre d'appel à `_draw_rib()` avec l'ancienne signature (voir le bug silencieux n°1 du RETEX plus bas) — la correction de ce point (le "point 3" discuté le 2026-07-14 : exporter la coupe longitudinale comme image séparée) doit de toute façon faire transiter `axis_cfg` jusqu'à `export_split_views()`, donc ce chantier et #13 sont liés. Pas encore fait — prochain chantier.
 
 Ce n'était pas un problème avant #13 puisque `axis_cfg` n'existait nulle part dans `compose_image()`.
 
@@ -77,7 +77,9 @@ Ce n'était pas un problème avant #13 puisque `axis_cfg` n'existait nulle part 
 
 6. **`template-presets`** : au-delà du chevauchement avec `longitudinal-section` sur la signature de `compose_image()` (facile à résoudre, deux nouveaux paramètres indépendants), elle reste retenue pour une autre raison (pas sûr que l'approche te convienne / convienne au mainteneur) — à traiter séparément, pas de contrainte d'ordre technique forte avec les autres.
 
-7. **`fix-compositor-axis-hardcoding` (#13)** : indépendante, sans risque, peut être mergée n'importe quand (aucune des autres branches ne touche `_draw_rib`/`_rib_used_bbox` au-delà des deux appels déjà existants dans `compose_image()`). Vu qu'elle contient exactement le même correctif que `longitudinal-section` avait déjà en interne, **`longitudinal-section` et `blender-reference-script` sont en train d'être rebasées dessus dès maintenant** (2026-07-14), sans attendre le merge amont — on retire leur copie devenue redondante du correctif, et on garde uniquement leurs ajouts propres.
+7. **`fix-compositor-axis-hardcoding` (#13)** : indépendante, sans risque, peut être mergée n'importe quand (aucune des autres branches ne touche `_draw_rib`/`_rib_used_bbox` au-delà des deux appels déjà existants dans `compose_image()`). **Fait le 2026-07-14** : `longitudinal-section` rebasée dessus (un seul conflit à résoudre, retiré la copie redondante du correctif, testé en conditions réelles, poussée en force-with-lease). `blender-reference-script` n'a PAS eu besoin d'être rebasée dessus — elle part de `split-view-export`, qui ne touche pas cette zone du code et n'a donc aucun conflit avec #13 pour l'instant.
+
+**Prochain chantier (pas encore commencé)** : implémenter les 4 manques identifiés le 2026-07-14 (marqueur longitudinal absent des images individuelles de `split-view-export`, pas de labels S1/S2 sur les traits croisés de la coupe longitudinale, coupe longitudinale absente du ZIP, absente du script Blender) — le point clé est de faire transiter `axis_cfg` jusqu'à `export_split_views()`, ce qui débloque presque tout le reste. Une fois fait, propager en cascade dans `blender-reference-script`, puis remettre à jour `test-full-integration` pour valider l'ensemble.
 
 ## Points à surveiller
 
