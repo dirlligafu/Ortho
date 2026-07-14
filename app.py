@@ -447,7 +447,7 @@ def generate():
                 with tempfile.TemporaryDirectory() as tmp:
                     up_idx = axis_cfg.axis_index(axis_cfg.up_axis)
                     rib_y_center = -center[up_idx] * rib_ppm
-                    saved = export_split_views(
+                    saved, layout = export_split_views(
                         view_results, tmp, base_name, axis_cfg,
                         rib_sections=rib_sections, rib_ppm=rib_ppm,
                         rib_y_center=rib_y_center, longitudinal_segments=longitudinal_segments,

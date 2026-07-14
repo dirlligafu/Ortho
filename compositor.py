@@ -788,4 +788,5 @@ def export_split_views(view_results, output_dir, base_name, axis_cfg,
         plt.close(fig)
         saved["longitudinal"] = out_path
 
-    return saved
+    layout = {"W": W, "H": H, "D": D, "max_dim": max_dim, "rib_fracs": rib_fracs}
+    return saved, layout
