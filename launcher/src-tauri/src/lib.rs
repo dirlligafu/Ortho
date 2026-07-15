@@ -4,7 +4,8 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use tauri::webview::DownloadEvent;
 use tauri::{AppHandle, Emitter, State, WebviewUrl, WebviewWindowBuilder};
-use tauri_plugin_opener::OpenerExt;
+
+const FLASK_URL: &str = "http://127.0.0.1:5000";
 
 #[derive(Clone)]
 struct FlaskChild(Arc<Mutex<Option<Child>>>);
@@ -48,11 +49,16 @@ fn find_python() -> Result<String, String> {
             use std::os::windows::process::CommandExt;
             c.creation_flags(0x0800_0000); // CREATE_NO_WINDOW — avoids Store shim delay
         }
-        if c.status().is_ok() {
+        if c.status().map(|s| s.success()).unwrap_or(false) {
             return Ok(cmd.to_string());
         }
     }
     Err("Python 3.9+ is required. Download from python.org.".to_string())
+}
+
+#[tauri::command]
+fn flask_url() -> String {
+    FLASK_URL.to_string()
 }
 
 #[tauri::command]
@@ -115,7 +121,7 @@ fn install_deps(app: AppHandle, python: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn launch_flask(python: String, state: State<'_, FlaskChild>) -> Result<(), String> {
+fn launch_flask(app: AppHandle, python: String, state: State<'_, FlaskChild>) -> Result<(), String> {
     let root = find_ortho_root();
 
     let mut cmd = Command::new(&python);
@@ -123,7 +129,7 @@ fn launch_flask(python: String, state: State<'_, FlaskChild>) -> Result<(), Stri
         .env("ORTHO_NO_BROWSER", "1")
         .current_dir(&root)
         .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .stderr(Stdio::piped());
 
     #[cfg(windows)]
     {
@@ -131,24 +137,21 @@ fn launch_flask(python: String, state: State<'_, FlaskChild>) -> Result<(), Stri
         cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
 
-    let child = cmd.spawn().map_err(|e| e.to_string())?;
+    let mut child = cmd.spawn().map_err(|e| e.to_string())?;
+    let stderr = child.stderr.take().unwrap();
+    std::thread::spawn(move || {
+        for line in BufReader::new(stderr).lines().flatten() {
+            let _ = app.emit("flask-error", &line);
+        }
+    });
+
     *state.0.lock().unwrap() = Some(child);
     Ok(())
 }
 
 #[tauri::command]
-fn reveal_output(app: AppHandle, url_path: String) -> Result<(), String> {
-    // url_path is like "/outputs/uuid.png" — resolve against the Ortho root
-    let rel = url_path.trim_start_matches('/');
-    let path = find_ortho_root().join(rel);
-    app.opener()
-        .reveal_item_in_dir(&path)
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
 fn navigate_to_flask(window: tauri::WebviewWindow) -> Result<(), String> {
-    let url = "http://127.0.0.1:5000".parse().map_err(|e: url::ParseError| e.to_string())?;
+    let url = FLASK_URL.parse().map_err(|e: url::ParseError| e.to_string())?;
     window.navigate(url).map_err(|e| e.to_string())
 }
 
@@ -159,7 +162,6 @@ pub fn run() {
 
     tauri::Builder::default()
         .manage(flask_state)
-        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title("Orthographic Template Generator")
@@ -190,11 +192,11 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             find_python,
+            flask_url,
             deps_need_install,
             install_deps,
             launch_flask,
             navigate_to_flask,
-            reveal_output,
         ])
         .on_window_event(move |_window, event| {
             if let tauri::WindowEvent::Destroyed = event {

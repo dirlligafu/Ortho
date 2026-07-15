@@ -25,10 +25,15 @@ function appendLog(line) {
   log.scrollTop = log.scrollHeight;
 }
 
-function waitForFlask() {
-  return new Promise(resolve => {
+function waitForFlask(url, timeoutMs = 30000) {
+  return new Promise((resolve, reject) => {
+    const deadline = Date.now() + timeoutMs;
     const check = () => {
-      fetch('http://127.0.0.1:5000', { mode: 'no-cors' })
+      if (Date.now() > deadline) {
+        reject(new Error('App failed to start after 30 seconds. Port 5000 may already be in use, or check the log above for details.'));
+        return;
+      }
+      fetch(url, { mode: 'no-cors' })
         .then(resolve)
         .catch(() => setTimeout(check, 500));
     };
@@ -37,6 +42,8 @@ function waitForFlask() {
 }
 
 async function launch() {
+  const flaskUrl = await invoke('flask_url');
+
   // 1. Find Python
   setStep('python', 'active', 'Checking Python...');
   let python;
@@ -73,15 +80,25 @@ async function launch() {
   // 3. Launch Flask
   el('step-flask').classList.remove('hidden');
   setStep('flask', 'active', 'Starting app...');
+  const unlistenFlaskError = await listen('flask-error', e => appendLog(e.payload));
   try {
     await invoke('launch_flask', { python });
   } catch (e) {
+    unlistenFlaskError();
     setStep('flask', 'error', 'Failed to start the app');
     showError(String(e));
     return;
   }
 
-  await waitForFlask();
+  try {
+    await waitForFlask(flaskUrl);
+  } catch (e) {
+    unlistenFlaskError();
+    setStep('flask', 'error', 'App failed to start');
+    showError(String(e));
+    return;
+  }
+  unlistenFlaskError();
   setStep('flask', 'done', 'App ready');
 
   // Navigate the Tauri window directly to Flask (no iframe — needed for

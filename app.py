@@ -525,11 +525,13 @@ def serve_output(filename):
 
 @app.route("/reveal-output", methods=["POST"])
 def reveal_output():
+    if not IS_TAURI:
+        return jsonify({"error": "not found"}), 404
     data = request.get_json(force=True)
     url_path = data.get("url_path", "")
     rel = url_path.lstrip("/")
     abs_path = os.path.normpath(os.path.join(BASE_DIR, rel))
-    if not abs_path.startswith(os.path.normpath(OUTPUT_DIR)):
+    if not abs_path.startswith(os.path.normpath(OUTPUT_DIR) + os.sep):
         return jsonify({"error": "access denied"}), 403
     if not os.path.exists(abs_path):
         return jsonify({"error": "file not found"}), 404
