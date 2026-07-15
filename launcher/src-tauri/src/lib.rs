@@ -1,0 +1,151 @@
+use std::io::{BufRead, BufReader};
+use std::path::PathBuf;
+use std::process::{Child, Command, Stdio};
+use std::sync::{Arc, Mutex};
+use tauri::{AppHandle, Emitter, State};
+
+#[derive(Clone)]
+struct FlaskChild(Arc<Mutex<Option<Child>>>);
+
+fn find_ortho_root() -> PathBuf {
+    // Walk up from the executable until we find app.py (works in dev and release)
+    if let Ok(exe) = std::env::current_exe() {
+        let mut dir = exe.parent().unwrap_or(std::path::Path::new(".")).to_path_buf();
+        for _ in 0..8 {
+            if dir.join("app.py").exists() {
+                return dir;
+            }
+            if let Some(p) = dir.parent() {
+                dir = p.to_path_buf();
+            } else {
+                break;
+            }
+        }
+    }
+    // Fallback for dev: launcher/ is one level below the Ortho root
+    std::env::current_dir()
+        .ok()
+        .and_then(|d| d.parent().map(|p| p.to_path_buf()))
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+#[tauri::command]
+fn find_python() -> Result<String, String> {
+    for cmd in &["py", "python3", "python"] {
+        if Command::new(cmd)
+            .arg("--version")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok()
+        {
+            return Ok(cmd.to_string());
+        }
+    }
+    Err("Python 3.9+ is required. Download from python.org.".to_string())
+}
+
+#[tauri::command]
+fn deps_need_install() -> bool {
+    let root = find_ortho_root();
+    let marker = root.join(".deps_installed");
+    let req = root.join("requirements.txt");
+    if !marker.exists() {
+        return true;
+    }
+    let m = std::fs::read(&marker).unwrap_or_default();
+    let r = std::fs::read(&req).unwrap_or_default();
+    m != r
+}
+
+#[tauri::command]
+fn install_deps(app: AppHandle, python: String) -> Result<(), String> {
+    let root = find_ortho_root();
+    let req = root.join("requirements.txt");
+
+    let mut cmd = Command::new(&python);
+    cmd.args(["-m", "pip", "install", "-r", req.to_str().unwrap_or("requirements.txt")])
+        .current_dir(&root)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+
+    let mut child = cmd.spawn().map_err(|e| e.to_string())?;
+
+    // Read stdout and stderr concurrently to avoid pipe buffer deadlock
+    let stdout = child.stdout.take().unwrap();
+    let stderr = child.stderr.take().unwrap();
+    let app2 = app.clone();
+
+    let stderr_thread = std::thread::spawn(move || {
+        for line in BufReader::new(stderr).lines().flatten() {
+            let _ = app2.emit("pip-output", &line);
+        }
+    });
+
+    for line in BufReader::new(stdout).lines().flatten() {
+        let _ = app.emit("pip-output", &line);
+    }
+    stderr_thread.join().ok();
+
+    let status = child.wait().map_err(|e| e.to_string())?;
+    if !status.success() {
+        return Err("pip install failed — see log above".to_string());
+    }
+
+    // Write marker so the next launch skips install
+    let marker = root.join(".deps_installed");
+    std::fs::copy(&req, &marker).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn launch_flask(python: String, state: State<'_, FlaskChild>) -> Result<(), String> {
+    let root = find_ortho_root();
+
+    let mut cmd = Command::new(&python);
+    cmd.arg("app.py")
+        .current_dir(&root)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+
+    let child = cmd.spawn().map_err(|e| e.to_string())?;
+    *state.0.lock().unwrap() = Some(child);
+    Ok(())
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    let flask_state = FlaskChild(Arc::new(Mutex::new(None)));
+    let flask_for_handler = flask_state.clone();
+
+    tauri::Builder::default()
+        .manage(flask_state)
+        .plugin(tauri_plugin_opener::init())
+        .invoke_handler(tauri::generate_handler![
+            find_python,
+            deps_need_install,
+            install_deps,
+            launch_flask,
+        ])
+        .on_window_event(move |_window, event| {
+            if let tauri::WindowEvent::Destroyed = event {
+                if let Some(mut c) = flask_for_handler.0.lock().unwrap().take() {
+                    let _: std::io::Result<()> = c.kill();
+                }
+            }
+        })
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}

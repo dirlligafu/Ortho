@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Orthographic Template Generator</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="splash">
+    <h1>Orthographic Template Generator</h1>
+    <div id="steps">
+      <div class="step" id="step-python">⋯ Checking Python...</div>
+      <div class="step hidden" id="step-deps"></div>
+      <div class="step hidden" id="step-flask"></div>
+    </div>
+    <pre id="pip-log" class="hidden"></pre>
+    <div id="error-box" class="hidden"></div>
+  </div>
+  <iframe id="app-frame" class="hidden" src="about:blank"></iframe>
+  <script type="module" src="/main.js"></script>
+</body>
+</html>
