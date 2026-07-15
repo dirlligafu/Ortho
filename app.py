@@ -442,7 +442,7 @@ def generate():
 
 @app.route("/outputs/<filename>")
 def serve_output(filename):
-    return send_from_directory(OUTPUT_DIR, filename)
+    return send_from_directory(OUTPUT_DIR, filename, as_attachment=True)
 
 
 if __name__ == "__main__":

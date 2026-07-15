@@ -148,8 +148,22 @@ pub fn run() {
                 .resizable(true)
                 .disable_drag_drop_handler()
                 .on_download(|_webview, event| {
-                    // Allow downloads; return false only to cancel
-                    !matches!(event, DownloadEvent::Finished { .. })
+                    if let DownloadEvent::Requested { url, destination } = event {
+                        if destination.as_os_str().is_empty() {
+                            // WebView2 didn't suggest a path; build one from the URL
+                            let url_str = url.as_str();
+                            let filename = url_str.split('/').last()
+                                .and_then(|s| s.split('?').next())
+                                .filter(|s| !s.is_empty())
+                                .unwrap_or("download");
+                            let base = std::env::var("USERPROFILE")
+                                .or_else(|_| std::env::var("HOME"))
+                                .map(PathBuf::from)
+                                .unwrap_or_else(|_| PathBuf::from("."));
+                            *destination = base.join("Downloads").join(filename);
+                        }
+                    }
+                    true
                 })
                 .build()?;
             Ok(())
