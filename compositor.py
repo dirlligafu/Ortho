@@ -521,10 +521,9 @@ def compose_image(view_results, rib_sections, rib_ppm, output_path,
                     nb = _view_used_bbox(view_results[name], pad_frac=0.0)
                     content_span = (nb[1] - nb[0]) if axis_kind == "x" else (nb[3] - nb[2])
                     padded_span  = (padded[1] - padded[0]) if axis_kind == "x" else (padded[3] - padded[2])
-                    n = len(rib_fracs)
                     fracs_for_view = [
                         (0.5 + ((1 - f if mirrored else f) - 0.5) * content_span / padded_span,
-                         (n - i if axis_kind == "x" else i + 1) if (show_chrome and label_sections) else None)
+                         (i + 1) if (show_chrome and label_sections) else None)
                         for i, f in enumerate(rib_fracs)
                     ]
                 else:
