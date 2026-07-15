@@ -84,11 +84,9 @@ async function launch() {
   await waitForFlask();
   setStep('flask', 'done', 'App ready');
 
-  // Swap splash → app iframe
-  el('splash').classList.add('hidden');
-  const frame = el('app-frame');
-  frame.src = 'http://127.0.0.1:5000';
-  frame.classList.remove('hidden');
+  // Navigate the Tauri window directly to Flask (no iframe — needed for
+  // drag-and-drop and file downloads to work properly in the WebView)
+  await invoke('navigate_to_flask');
 }
 
 launch();

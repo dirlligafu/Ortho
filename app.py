@@ -451,8 +451,10 @@ if __name__ == "__main__":
     print(f"Open http://{HOST}:{PORT} in your browser.")
 
     # Automatically open the app in the default browser, so the person never
-    # has to manually type the address.
-    webbrowser.open(f"http://{HOST}:{PORT}")
+    # has to manually type the address.  When running inside the Tauri
+    # launcher, ORTHO_NO_BROWSER=1 is set so the Tauri window is used instead.
+    if not os.environ.get("ORTHO_NO_BROWSER"):
+        webbrowser.open(f"http://{HOST}:{PORT}")
 
     # On macOS, pyrender/pyglet's underlying window/GL machinery is known to
     # crash if touched from a non-main thread ("NSWindow drag regions should

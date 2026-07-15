@@ -110,6 +110,7 @@ fn launch_flask(python: String, state: State<'_, FlaskChild>) -> Result<(), Stri
 
     let mut cmd = Command::new(&python);
     cmd.arg("app.py")
+        .env("ORTHO_NO_BROWSER", "1")
         .current_dir(&root)
         .stdout(Stdio::null())
         .stderr(Stdio::null());
@@ -125,6 +126,12 @@ fn launch_flask(python: String, state: State<'_, FlaskChild>) -> Result<(), Stri
     Ok(())
 }
 
+#[tauri::command]
+fn navigate_to_flask(window: tauri::WebviewWindow) -> Result<(), String> {
+    let url = "http://127.0.0.1:5000".parse().map_err(|e: url::ParseError| e.to_string())?;
+    window.navigate(url).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let flask_state = FlaskChild(Arc::new(Mutex::new(None)));
@@ -138,6 +145,7 @@ pub fn run() {
             deps_need_install,
             install_deps,
             launch_flask,
+            navigate_to_flask,
         ])
         .on_window_event(move |_window, event| {
             if let tauri::WindowEvent::Destroyed = event {

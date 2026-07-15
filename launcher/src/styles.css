@@ -67,11 +67,4 @@ h1 {
   white-space: pre-wrap;
 }
 
-#app-frame {
-  position: fixed;
-  top: 0; left: 0;
-  width: 100%; height: 100%;
-  border: none;
-}
-
 .hidden { display: none !important; }
