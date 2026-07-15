@@ -289,6 +289,7 @@ def generate():
             include_longitudinal = bool(data.get("include_longitudinal", False))
             split_views = data.get("split_views", False)
             include_blender_script = data.get("include_blender_script", False)
+            label_sections = bool(data.get("label_sections", False))
             bg_color = data.get("bg_color", "#FFFFFF")
             line_color = data.get("line_color", "#000000")
             scale_pct = int(data.get("scale_pct", 100))
@@ -459,6 +460,7 @@ def generate():
                         rib_y_center=rib_y_center, rib_x_center=rib_x_center,
                         long_x_center=long_x_center, longitudinal_segments=longitudinal_segments,
                         bg_color=bg_color, line_color=line_color, scale_pct=scale_pct,
+                        label_sections=label_sections,
                     )
                     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
                         for view_name, img_path in saved.items():
