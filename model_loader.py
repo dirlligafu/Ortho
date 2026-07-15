@@ -100,7 +100,14 @@ def _parse_obj_groups(path):
                             uv_ambiguous += 1
                         else:
                             vertex_uv[v_idx] = vt_idx
-                groups[current].append(idx)
+                if len(idx) < 3:
+                    continue
+                # Fan-triangulate quads/n-gons: exported OBJs without a
+                # "Triangulate" step mix face vertex counts, which crashes
+                # np.array(all_faces) downstream with an inhomogeneous-shape
+                # error since it expects every face to have the same length.
+                for i in range(1, len(idx) - 1):
+                    groups[current].append([idx[0], idx[i], idx[i + 1]])
 
     if not groups.get("(ungrouped)"):
         groups.pop("(ungrouped)", None)
