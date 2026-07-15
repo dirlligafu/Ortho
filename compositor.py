@@ -146,14 +146,20 @@ def _draw_view(ax, result, bbox, line_color, bg_color="#FFFFFF",
         # pixel regardless of where along the axis it actually is), so a
         # cut position has no meaningful line to draw there at all —
         # callers simply don't pass markers for those views.
-        for frac in (rib_marker_x_fracs or []):
+        for frac, num in (rib_marker_x_fracs or []):
             x = xmin + frac * (xmax - xmin)
             ax.plot([x, x], [ymin, ymax], linestyle=(0, (2, 4)), linewidth=0.5,
                     color=line_color, alpha=0.35, zorder=1, solid_capstyle="butt")
-        for frac in (rib_marker_y_fracs or []):
+            if num is not None:
+                ax.text(x, ymin + (ymax - ymin) * 0.02, f"S{num}", ha="center", va="top",
+                        fontsize=18 * cs, family="DejaVu Sans", color=line_color, alpha=0.85, zorder=1)
+        for frac, num in (rib_marker_y_fracs or []):
             y = ymin + frac * (ymax - ymin)
             ax.plot([xmin, xmax], [y, y], linestyle=(0, (2, 4)), linewidth=0.5,
                     color=line_color, alpha=0.35, zorder=1, solid_capstyle="butt")
+            if num is not None:
+                ax.text(xmin + (xmax - xmin) * 0.01, y, f"S{num}", ha="left", va="center",
+                        fontsize=18 * cs, family="DejaVu Sans", color=line_color, alpha=0.85, zorder=1)
 
     outer_segs = [np.column_stack([c[:, 1], c[:, 0]]) for c in result["outer_contours"]]
     if outer_segs:
@@ -266,7 +272,8 @@ def compose_image(view_results, rib_sections, rib_ppm, output_path,
                    axis_cfg,
                    bg_color="#FFFFFF", line_color="#000000",
                    scale_pct=100, dpi_base=250,
-                   model_name=None, show_chrome=True, part_numbers=None):
+                   model_name=None, show_chrome=True, part_numbers=None,
+                   label_sections=True):
     """view_results: dict of {view_name: render_view() result}, only for
     views the user actually requested.
     axis_cfg: the AxisConfig the mesh was rendered with. Required (no
@@ -442,18 +449,14 @@ def compose_image(view_results, rib_sections, rib_ppm, output_path,
                 ax = add_axes_px(x_cursor, y_cursor, w_v, view_row_h)
                 axis_kind, mirrored = _RIB_MARKER_AXIS.get(name, (None, False))
                 if axis_kind and rib_fracs:
-                    # bboxes[name] includes 5% padding on each side; raw fracs
-                    # applied to the padded span place cut lines at the wrong
-                    # pixel — the outermost intervals appear narrower than the
-                    # interior ones. Remap fracs so each line lands on the
-                    # correct content pixel regardless of padding.
                     padded = bboxes[name]
                     nb = _view_used_bbox(view_results[name], pad_frac=0.0)
                     content_span = (nb[1] - nb[0]) if axis_kind == "x" else (nb[3] - nb[2])
                     padded_span  = (padded[1] - padded[0]) if axis_kind == "x" else (padded[3] - padded[2])
                     fracs_for_view = [
-                        0.5 + ((1 - f if mirrored else f) - 0.5) * content_span / padded_span
-                        for f in rib_fracs
+                        (0.5 + ((1 - f if mirrored else f) - 0.5) * content_span / padded_span,
+                         (i + 1) if (show_chrome and label_sections) else None)
+                        for i, f in enumerate(rib_fracs)
                     ]
                 else:
                     fracs_for_view = []
