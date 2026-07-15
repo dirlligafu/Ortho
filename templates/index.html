@@ -491,19 +491,22 @@ function generate() {
   });
 }
 
+{% if is_tauri %}
 // In the Tauri app, clicking a download link reveals the file in the
 // system file manager (outputs/ folder, file pre-selected) rather than
 // triggering a browser download, which is unreliable in WebView2.
-if (window.__TAURI__) {
-  document.addEventListener('click', function(e) {
-    var a = e.target.closest('a[download]');
-    if (!a || !a.href) return;
-    e.preventDefault();
-    var urlPath = new URL(a.href).pathname;
-    window.__TAURI__.core.invoke('reveal_output', { urlPath: urlPath })
-      .catch(function(err) { console.error('Could not reveal file: ' + err); });
-  });
-}
+document.addEventListener('click', function(e) {
+  var a = e.target.closest('a[download]');
+  if (!a || !a.href) return;
+  e.preventDefault();
+  var urlPath = new URL(a.href).pathname;
+  fetch('/reveal-output', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({url_path: urlPath})
+  }).catch(function(err) { console.error('Could not reveal file: ' + err); });
+});
+{% endif %}
 </script>
 
 </body>

@@ -12,6 +12,7 @@ STATUS.md. See that file for full project context and decisions.
 HOST = "127.0.0.1"
 PORT = 5000
 
+import subprocess
 import sys
 import webbrowser
 
@@ -73,6 +74,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
 UPLOAD_TMP_DIR = os.path.join(UPLOAD_DIR, "_tmp")
 OUTPUT_DIR = os.path.join(BASE_DIR, "outputs")
+IS_TAURI = bool(os.environ.get("ORTHO_NO_BROWSER"))
 SELECTIONS_DIR = os.path.join(BASE_DIR, "selections")
 GLOBAL_PREFS_PATH = os.path.join(BASE_DIR, "global_prefs.json")
 for d in (UPLOAD_DIR, OUTPUT_DIR, SELECTIONS_DIR, UPLOAD_TMP_DIR):
@@ -156,7 +158,7 @@ def get_preferences():
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", is_tauri=IS_TAURI)
 
 
 @app.route("/upload", methods=["POST"])
@@ -443,6 +445,28 @@ def generate():
 @app.route("/outputs/<filename>")
 def serve_output(filename):
     return send_from_directory(OUTPUT_DIR, filename, as_attachment=True)
+
+
+@app.route("/reveal-output", methods=["POST"])
+def reveal_output():
+    data = request.get_json(force=True)
+    url_path = data.get("url_path", "")
+    rel = url_path.lstrip("/")
+    abs_path = os.path.normpath(os.path.join(BASE_DIR, rel))
+    if not abs_path.startswith(os.path.normpath(OUTPUT_DIR)):
+        return jsonify({"error": "access denied"}), 403
+    if not os.path.exists(abs_path):
+        return jsonify({"error": "file not found"}), 404
+    try:
+        if sys.platform == "win32":
+            subprocess.Popen(["explorer", "/select,", abs_path])
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", "-R", abs_path])
+        else:
+            subprocess.Popen(["xdg-open", os.path.dirname(abs_path)])
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == "__main__":
