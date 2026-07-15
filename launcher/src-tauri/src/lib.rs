@@ -41,13 +41,14 @@ fn find_ortho_root() -> PathBuf {
 #[tauri::command]
 fn find_python() -> Result<String, String> {
     for cmd in &["py", "python3", "python"] {
-        if Command::new(cmd)
-            .arg("--version")
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .is_ok()
+        let mut c = Command::new(cmd);
+        c.arg("--version").stdout(Stdio::null()).stderr(Stdio::null());
+        #[cfg(windows)]
         {
+            use std::os::windows::process::CommandExt;
+            c.creation_flags(0x0800_0000); // CREATE_NO_WINDOW — avoids Store shim delay
+        }
+        if c.status().is_ok() {
             return Ok(cmd.to_string());
         }
     }
