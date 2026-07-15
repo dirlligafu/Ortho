@@ -72,7 +72,21 @@
   #scale_val { font-weight: bold; }
   #theme_toggle_wrap { display: flex; justify-content: flex-end; margin-top: 10px; }
   #theme_toggle { padding: 5px 12px; font-size: 0.85em; }
+  .preview_col { margin-top: 12px; }
+  #preview_canvas { width: 100%; aspect-ratio: 5/3; display: block; border-radius: 6px; border: 1px solid var(--list_border); cursor: grab; }
+  #preview_canvas:active { cursor: grabbing; }
+  #preview_status { text-align: center; font-size: 0.82em; color: var(--text_muted); margin-top: 4px; min-height: 1.1em; }
+  .part_row--lit { background: rgba(220, 130, 40, 0.22) !important; }
 </style>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "/static/vendor/three/build/three.module.js",
+    "three/addons/": "/static/vendor/three/jsm/"
+  }
+}
+</script>
 </head>
 <body>
 
@@ -153,6 +167,25 @@
     <span id="part_count" style="margin-left:auto;align-self:center;color:#666;font-size:0.9em;"></span>
   </div>
   <div id="part_list_box"></div>
+  <div class="preview_col">
+    <canvas id="preview_canvas"></canvas>
+    <div id="preview_status">3D preview will appear here after upload</div>
+    <div style="display:flex;align-items:center;gap:16px;margin-top:6px;flex-wrap:wrap;">
+      <label style="font-size:0.82em;color:var(--text_muted);display:flex;align-items:center;gap:4px;">
+        <input type="checkbox" id="preview_hover_cb"> Highlight hovered part
+      </label>
+      <label style="font-size:0.82em;color:var(--text_muted);display:flex;align-items:center;gap:4px;">Shading
+        <select id="preview_shading" style="font-size:1em;background:var(--input_bg);color:var(--text);border:1px solid var(--input_border);border-radius:4px;padding:1px 4px;">
+          <option value="clay">Clay</option>
+          <option value="flat">Faceted</option>
+          <option value="glossy">Glossy</option>
+        </select>
+      </label>
+      <label style="font-size:0.82em;color:var(--text_muted);display:flex;align-items:center;gap:4px;">Color
+        <input type="color" id="preview_color" value="#d4cfc8" style="width:32px;height:22px;padding:1px;border:1px solid var(--input_border);border-radius:4px;cursor:pointer;background:none;">
+      </label>
+    </div>
+  </div>
 </div>
 
 <div class="section hidden" id="options_section">
@@ -360,6 +393,9 @@ function handleFile(file) {
       document.getElementById('parts_section').classList.remove('hidden');
       document.getElementById('options_section').classList.remove('hidden');
       document.getElementById('generate_section').classList.remove('hidden');
+      window.dispatchEvent(new CustomEvent('modelLoaded', {
+        detail: { sessionId: data.session_id, previewExt: data.preview_ext || null }
+      }));
     })
     .catch(err => setStatus('Upload failed: ' + err, true));
 }
@@ -376,8 +412,10 @@ function renderPartList(filterText) {
     row.className = 'part_row';
     const cb = document.createElement('input');
     cb.type = 'checkbox';
+    cb.className = 'part_cb';
     cb.checked = !excludedParts.has(name);
     cb.id = 'part_' + shown;
+    cb.dataset.partName = name;
     cb.addEventListener('change', () => {
       if (cb.checked) excludedParts.delete(name); else excludedParts.add(name);
       updatePartCount();
@@ -411,6 +449,9 @@ function selectAll(state) {
     if (state) excludedParts.delete(name); else excludedParts.add(name);
   });
   renderPartList(document.getElementById('part_filter').value);
+  window.dispatchEvent(new CustomEvent('partsSelectionChanged', {
+    detail: { excluded: Array.from(excludedParts) }
+  }));
 }
 
 function setColors(bg, line) {
@@ -528,6 +569,264 @@ document.addEventListener('click', function(e) {
   }).catch(function(err) { console.error('Could not reveal file: ' + err); });
 });
 {% endif %}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
+import { ColladaLoader } from 'three/addons/loaders/ColladaLoader.js';
+import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+const canvas = document.getElementById('preview_canvas');
+const statusEl = document.getElementById('preview_status');
+
+let renderer, scene, camera, controls, modelGroup;
+let cbListenerAdded = false, hoverListenerAdded = false;
+let litMesh = null, litRow = null, pendingMouseMove = null;
+const raycaster = new THREE.Raycaster();
+const mouseNDC = new THREE.Vector2();
+const _hlColor = new THREE.Color(0xee7700);
+
+function initRenderer() {
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  renderer.setPixelRatio(window.devicePixelRatio);
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 0.8;
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  resize();
+
+  scene = new THREE.Scene();
+
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(new RoomEnvironment()).texture;
+  pmrem.dispose();
+
+  // One subtle directional for shadow definition on top of the environment
+  const key = new THREE.DirectionalLight(0xffffff, 0.4);
+  key.position.set(2, 3, 3);
+  scene.add(key);
+
+  camera = new THREE.PerspectiveCamera(45, canvas.clientWidth / canvas.clientHeight, 0.001, 100000);
+
+  controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+
+  new ResizeObserver(resize).observe(canvas);
+
+  (function loop() {
+    requestAnimationFrame(loop);
+    controls.update();
+    if (pendingMouseMove) { doRaycast(pendingMouseMove); pendingMouseMove = null; }
+    renderer.render(scene, camera);
+  })();
+}
+
+function resize() {
+  if (!renderer) return;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  if (!w || !h) return;
+  renderer.setSize(w, h, false);
+  if (camera) { camera.aspect = w / h; camera.updateProjectionMatrix(); }
+}
+
+function fitCamera(object) {
+  const box = new THREE.Box3().setFromObject(object);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  const maxDim = Math.max(size.x, size.y, size.z);
+  const dist = maxDim / (2 * Math.tan(camera.fov * Math.PI / 360)) * 1.6;
+  camera.near = maxDim * 0.0005;
+  camera.far = maxDim * 200;
+  camera.updateProjectionMatrix();
+  camera.position.set(center.x + dist * 0.4, center.y + dist * 0.3, center.z + dist);
+  controls.target.copy(center);
+  controls.update();
+}
+
+function modelColor() {
+  return document.getElementById('preview_color')?.value ?? '#d4cfc8';
+}
+
+function buildMaterial(mode) {
+  const color = modelColor();
+  if (mode === 'flat')   return new THREE.MeshStandardMaterial({ color, roughness: 0.9,  metalness: 0,    flatShading: true, side: THREE.DoubleSide });
+  if (mode === 'glossy') return new THREE.MeshStandardMaterial({ color, roughness: 0.08, metalness: 0.15, side: THREE.DoubleSide });
+  /* clay */             return new THREE.MeshStandardMaterial({ color, roughness: 0.85, metalness: 0,    side: THREE.DoubleSide });
+}
+
+function applyShading(mode) {
+  if (!modelGroup) return;
+  modelGroup.traverse(obj => {
+    if (!obj.isMesh) return;
+    const wasHighlighted = obj === litMesh;
+    obj.material = buildMaterial(mode);
+    if (wasHighlighted) { setHighlight(obj, true); }
+  });
+}
+
+function applyDefaultMaterial(root) {
+  root.traverse(obj => {
+    if (obj.isMesh) obj.material = buildMaterial('clay');
+  });
+}
+
+function addEdges(root) {
+  root.traverse(obj => {
+    if (!obj.isMesh) return;
+    const geo = new THREE.EdgesGeometry(obj.geometry, 15);
+    const mat = new THREE.LineBasicMaterial({ color: 0x111111, transparent: true, opacity: 0.22 });
+    obj.add(new THREE.LineSegments(geo, mat));
+  });
+}
+
+const hoverCb = () => document.getElementById('preview_hover_cb')?.checked ?? true;
+
+function setHighlight(mesh, on) {
+  if (!mesh?.material) return;
+  mesh.material.emissive.copy(on ? _hlColor : new THREE.Color(0));
+  mesh.material.emissiveIntensity = on ? 0.45 : 0;
+}
+
+function clearHighlight() {
+  if (litMesh) { setHighlight(litMesh, false); litMesh = null; }
+  if (litRow)  { litRow.classList.remove('part_row--lit'); litRow = null; }
+}
+
+function doRaycast(e) {
+  if (!modelGroup || !hoverCb()) { clearHighlight(); return; }
+  const rect = canvas.getBoundingClientRect();
+  mouseNDC.x =  ((e.clientX - rect.left) / rect.width)  * 2 - 1;
+  mouseNDC.y = -((e.clientY - rect.top)  / rect.height) * 2 + 1;
+  raycaster.setFromCamera(mouseNDC, camera);
+  const meshes = [];
+  modelGroup.traverse(o => { if (o.isMesh && o.visible) meshes.push(o); });
+  const hit = raycaster.intersectObjects(meshes, false)[0]?.object ?? null;
+  if (hit === litMesh) return;
+  clearHighlight();
+  if (hit) {
+    setHighlight(hit, true);
+    litMesh = hit;
+    const cb = document.querySelector(`.part_cb[data-part-name="${CSS.escape(hit.name)}"]`);
+    const row = cb?.closest('.part_row');
+    if (row) {
+      row.classList.add('part_row--lit'); litRow = row;
+      const box = document.getElementById('part_list_box');
+      const boxRect = box.getBoundingClientRect();
+      const rowRect = row.getBoundingClientRect();
+      const relTop = rowRect.top - boxRect.top + box.scrollTop;
+      const relBot = relTop + row.offsetHeight;
+      if (relTop < box.scrollTop) box.scrollTop = relTop;
+      else if (relBot > box.scrollTop + box.clientHeight) box.scrollTop = relBot - box.clientHeight;
+    }
+  }
+}
+
+function wireHover() {
+  if (hoverListenerAdded) return;
+  hoverListenerAdded = true;
+
+  // List → Viewer
+  document.getElementById('part_list_box').addEventListener('mouseover', e => {
+    if (!hoverCb()) return;
+    const row  = e.target.closest('.part_row');
+    const name = row?.querySelector('.part_cb')?.dataset.partName;
+    if (!name || !modelGroup) return;
+    if (litMesh?.name === name) return;
+    clearHighlight();
+    modelGroup.traverse(o => {
+      if (o.isMesh && o.name === name && o.visible && !litMesh) { setHighlight(o, true); litMesh = o; }
+    });
+  });
+  document.getElementById('part_list_box').addEventListener('mouseleave', () => {
+    if (litMesh) { setHighlight(litMesh, false); litMesh = null; }
+  });
+
+  // Viewer → List (batched in render loop)
+  canvas.addEventListener('mousemove', e => { pendingMouseMove = e; });
+  canvas.addEventListener('mouseleave', clearHighlight);
+
+  // Shading mode switcher
+  document.getElementById('preview_shading').addEventListener('change', e => applyShading(e.target.value));
+
+
+  // Diffuse color picker
+  document.getElementById('preview_color').addEventListener('input', () => {
+    if (!modelGroup) return;
+    const color = modelColor();
+    modelGroup.traverse(obj => {
+      if (obj.isMesh && obj.material) obj.material.color.set(color);
+    });
+  });
+}
+
+function loadPreview(sessionId, ext) {
+  if (!renderer) initRenderer();
+
+  if (modelGroup) { scene.remove(modelGroup); modelGroup = null; }
+  statusEl.textContent = 'Loading 3D preview…';
+
+  const url = '/preview/' + sessionId;
+
+  const onLoad = (root) => {
+    modelGroup = new THREE.Group();
+    modelGroup.add(root);
+    let partIndex = 0;
+    modelGroup.traverse(obj => { if (obj.isMesh) obj.name = allPartNames[partIndex++] ?? obj.name; });
+    applyDefaultMaterial(modelGroup);
+    addEdges(modelGroup);
+    scene.add(modelGroup);
+    fitCamera(modelGroup);
+    wireCheckboxes();
+    wireHover();
+    statusEl.textContent = 'Left drag: rotate  ·  Right drag: pan  ·  Scroll: zoom';
+  };
+
+  const onError = () => { statusEl.textContent = '3D preview unavailable for this file.'; };
+
+  if (ext === '.glb' || ext === '.gltf') {
+    new GLTFLoader().load(url, g => onLoad(g.scene), undefined, onError);
+  } else if (ext === '.obj') {
+    new OBJLoader().load(url, onLoad, undefined, onError);
+  } else if (ext === '.dae') {
+    new ColladaLoader().load(url, c => onLoad(c.scene), undefined, onError);
+  } else if (ext === '.stl') {
+    new STLLoader().load(url, geo => onLoad(new THREE.Mesh(geo)), undefined, onError);
+  } else {
+    onError();
+  }
+}
+
+function syncVisibility(excluded) {
+  if (!modelGroup) return;
+  modelGroup.traverse(obj => {
+    if (obj.isMesh && obj.name) obj.visible = !excluded.has(obj.name);
+  });
+}
+
+function wireCheckboxes() {
+  if (cbListenerAdded) return;
+  cbListenerAdded = true;
+  document.getElementById('part_list_box').addEventListener('change', e => {
+    const name = e.target.dataset && e.target.dataset.partName;
+    if (!name || !modelGroup) return;
+    modelGroup.traverse(obj => {
+      if (obj.isMesh && obj.name === name) obj.visible = e.target.checked;
+    });
+  });
+}
+
+window.addEventListener('modelLoaded', e => {
+  const { sessionId, previewExt } = e.detail;
+  if (!previewExt) { statusEl.textContent = '3D preview not available for ZIP uploads.'; return; }
+  loadPreview(sessionId, previewExt);
+});
+
+window.addEventListener('partsSelectionChanged', e => {
+  syncVisibility(new Set(e.detail.excluded));
+});
 </script>
 
 </body>
