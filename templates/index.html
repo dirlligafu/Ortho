@@ -490,6 +490,30 @@ function generate() {
     progressWrap.classList.add('hidden');
   });
 }
+
+// In the Tauri WebView, <a download> triggers a navigation instead of
+// a file download. Intercept all download-link clicks and use
+// fetch + Blob URL, which always works regardless of WebView2 behaviour.
+if (window.__TAURI__) {
+  document.addEventListener('click', function(e) {
+    var a = e.target.closest('a[download]');
+    if (!a || !a.href) return;
+    e.preventDefault();
+    var filename = a.getAttribute('download') || 'download';
+    fetch(a.href)
+      .then(function(r) { return r.blob(); })
+      .then(function(blob) {
+        var blobUrl = URL.createObjectURL(blob);
+        var tmp = document.createElement('a');
+        tmp.href = blobUrl;
+        tmp.download = filename;
+        document.body.appendChild(tmp);
+        tmp.click();
+        document.body.removeChild(tmp);
+        setTimeout(function() { URL.revokeObjectURL(blobUrl); }, 1000);
+      });
+  });
+}
 </script>
 
 </body>
