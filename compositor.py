@@ -42,13 +42,13 @@ def _view_used_bbox(result, pad_frac=0.05):
     return xs.min() - pad, xs.max() + pad, ys.min() - pad, ys.max() + pad
 
 
-def _rib_used_bbox(rib_segments, ppm, pad_frac=0.05):
+def _rib_used_bbox(rib_segments, ppm, h_idx, v_idx, pad_frac=0.05):
     if not rib_segments:
         return (0, 1, 0, 1)
     xs, ys = [], []
     for p0, p1 in rib_segments:
-        xs += [p0[0] * ppm, p1[0] * ppm]
-        ys += [-p0[1] * ppm, -p1[1] * ppm]
+        xs += [p0[h_idx] * ppm, p1[h_idx] * ppm]
+        ys += [-p0[v_idx] * ppm, -p1[v_idx] * ppm]
     xs = np.array(xs); ys = np.array(ys)
     w = xs.max() - xs.min(); h = ys.max() - ys.min()
     pad = pad_frac * max(w, h) if max(w, h) > 0 else 1
@@ -193,12 +193,19 @@ def _draw_view(ax, result, bbox, line_color, bg_color="#FFFFFF",
                 clip_on=False)
 
 
-def _draw_rib(ax, rib_segments, ppm, bbox, line_color, lw=1.0):
+def _draw_rib(ax, rib_segments, ppm, bbox, h_idx, v_idx, line_color, lw=1.0):
     """Same batching fix as _draw_view, applied to rib/cross-section
     segments — these can also number in the thousands on fragmented
-    meshes and would hit the identical per-Line2D overhead otherwise."""
+    meshes and would hit the identical per-Line2D overhead otherwise.
+
+    h_idx/v_idx: which world-axis index (0=x,1=y,2=z) of each 3D segment
+    point to plot as horizontal/vertical. Only correct as a hardcoded
+    (0,1) pair for the default up_axis="y"/forward_axis="z" config --
+    for any other up_axis choice the two axes left over after a cut are
+    a different pair, so this must be computed by the caller instead of
+    assumed here."""
     if rib_segments:
-        segs = np.array([[[p0[0] * ppm, -p0[1] * ppm], [p1[0] * ppm, -p1[1] * ppm]]
+        segs = np.array([[[p0[h_idx] * ppm, -p0[v_idx] * ppm], [p1[h_idx] * ppm, -p1[v_idx] * ppm]]
                           for p0, p1 in rib_segments])
         ax.add_collection(LineCollection(segs, colors=line_color, linewidths=lw,
                                           capstyle="round", joinstyle="round"))
@@ -256,11 +263,18 @@ LABEL_GAP_PX = 10  # px, fixed gap between a view/rib panel's bottom edge and
 
 
 def compose_image(view_results, rib_sections, rib_ppm, output_path,
+                   axis_cfg,
                    bg_color="#FFFFFF", line_color="#000000",
                    scale_pct=100, dpi_base=250,
                    model_name=None, show_chrome=True, part_numbers=None):
     """view_results: dict of {view_name: render_view() result}, only for
     views the user actually requested.
+    axis_cfg: the AxisConfig the mesh was rendered with. Required (no
+    default) because it determines which world-axis indices of each rib
+    cut's 3D segment points are the correct pair to plot as
+    horizontal/vertical -- previously hardcoded to (0,1), which was only
+    correct by coincidence for the default up_axis="y"/forward_axis="z"
+    setup (see _rib_used_bbox/_draw_rib).
     rib_sections: list of rib cuts, each a list of (p0,p1) segment pairs
     (as returned by renderer.render_rib_sections) — empty list if no rib
     cuts requested. Rib cuts are laid out in a grid, wrapping at
@@ -308,12 +322,15 @@ def compose_image(view_results, rib_sections, rib_ppm, output_path,
     LABEL_H = (52 * cs) if show_chrome else 0  # extra row height reserved for the view-name label
                                          # (doubled alongside the label font size)
 
+    rib_h_idx = axis_cfg.axis_index(axis_cfg.side_axis)
+    rib_v_idx = axis_cfg.axis_index(axis_cfg.up_axis)
+
     rib_bboxes = []
     rib_sizes = []
     has_rib = bool(rib_sections)
     if has_rib:
         for segs in rib_sections:
-            bbox = _rib_used_bbox(segs, rib_ppm)
+            bbox = _rib_used_bbox(segs, rib_ppm, rib_h_idx, rib_v_idx)
             rib_bboxes.append(bbox)
             rib_sizes.append((bbox[1] - bbox[0], bbox[3] - bbox[2]))
     rib_fracs = rib_cut_fractions(len(rib_sections)) if has_rib else []
@@ -453,7 +470,7 @@ def compose_image(view_results, rib_sections, rib_ppm, output_path,
             for n, i in enumerate(row["indices"]):
                 w_r, h_r = rib_sizes[i]
                 ax = add_axes_px(x_cursor, y_cursor, w_r, view_row_h)
-                _draw_rib(ax, rib_sections[i], rib_ppm, rib_bboxes[i], line_color)
+                _draw_rib(ax, rib_sections[i], rib_ppm, rib_bboxes[i], rib_h_idx, rib_v_idx, line_color)
                 if show_chrome:
                     ax.text(0.5, label_yfrac, f"SECTION {i + 1}", transform=ax.transAxes, ha="center", va="top",
                             fontsize=18 * cs, family="DejaVu Sans", color=line_color, alpha=0.85, clip_on=False)

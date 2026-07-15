@@ -426,6 +426,7 @@ def generate():
             model_display_name = os.path.splitext(filename)[0] or None
             compose_image(
                 view_results, rib_sections, rib_ppm, out_path,
+                axis_cfg,
                 bg_color=bg_color, line_color=line_color, scale_pct=scale_pct,
                 model_name=model_display_name,
                 part_numbers=(part_numbers if label_parts else None),
