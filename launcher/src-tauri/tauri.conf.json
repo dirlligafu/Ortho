@@ -16,6 +16,21 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "resources": {
+      "../../app.py": "app.py",
+      "../../compositor.py": "compositor.py",
+      "../../renderer.py": "renderer.py",
+      "../../model_loader.py": "model_loader.py",
+      "../../blender_export.py": "blender_export.py",
+      "../../depth_render.py": "depth_render.py",
+      "../../visibility.py": "visibility.py",
+      "../../kn5_reader.py": "kn5_reader.py",
+      "../../kn5_to_obj.py": "kn5_to_obj.py",
+      "../../_check_python_version.py": "_check_python_version.py",
+      "../../requirements.txt": "requirements.txt",
+      "../../templates/": "templates/",
+      "../../static/": "static/"
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

@@ -10,9 +10,16 @@ use tauri_plugin_opener::OpenerExt;
 struct FlaskChild(Arc<Mutex<Option<Child>>>);
 
 fn find_ortho_root() -> PathBuf {
-    // Walk up from the executable until we find app.py (works in dev and release)
     if let Ok(exe) = std::env::current_exe() {
-        let mut dir = exe.parent().unwrap_or(std::path::Path::new(".")).to_path_buf();
+        let exe_dir = exe.parent().unwrap_or(std::path::Path::new(".")).to_path_buf();
+        // Check exe_dir and exe_dir/resources (Tauri bundle layout on some platforms)
+        for candidate in [exe_dir.clone(), exe_dir.join("resources")] {
+            if candidate.join("app.py").exists() {
+                return candidate;
+            }
+        }
+        // Walk up (works in dev where exe is deep inside target/)
+        let mut dir = exe_dir;
         for _ in 0..8 {
             if dir.join("app.py").exists() {
                 return dir;
