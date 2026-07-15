@@ -199,6 +199,7 @@
     <label><input type="checkbox" class="view_cb" value="bottom"> Bottom</label>
     <label><input type="checkbox" id="rib_cb"> Cross-section cut(s)</label>
     <label><input type="checkbox" id="longitudinal_cb"> Longitudinal section</label>
+    <label><input type="checkbox" id="split_views_cb"> Export split views (ZIP)</label>
   </div>
   <div class="color_row" style="margin-top:8px;">
     <label>Number of cuts
@@ -301,6 +302,9 @@
   <img id="result_img" class="hidden">
   <div id="download_row" class="hidden" style="margin-top:8px;">
     <a id="download_link" download="orthographic_template.png">Download image</a>
+  </div>
+  <div style="margin-top:4px;">
+    <a id="download_zip" class="hidden" download="views.zip">Download ZIP (split views)</a>
   </div>
 </div>
 
@@ -476,6 +480,7 @@ function generate() {
   document.getElementById('gen_status').style.color = '#555';
   document.getElementById('result_img').classList.add('hidden');
   document.getElementById('download_row').classList.add('hidden');
+  document.getElementById('download_zip').classList.add('hidden');
 
   const progressBar = document.getElementById('progress_bar');
   const progressWrap = document.getElementById('progress_wrap');
@@ -489,6 +494,7 @@ function generate() {
     include_rib: includeRib,
     rib_cuts: parseInt(document.getElementById('rib_cuts_slider').value),
     include_longitudinal: includeLongitudinal,
+    split_views: document.getElementById('split_views_cb').checked,
     bg_color: document.getElementById('bg_color').value,
     line_color: document.getElementById('line_color').value,
     scale_pct: parseInt(document.getElementById('scale_slider').value),
@@ -543,6 +549,11 @@ function generate() {
             const fmt = document.getElementById('output_format_select').value;
             link.setAttribute('download', 'orthographic_template.' + fmt);
             document.getElementById('download_row').classList.remove('hidden');
+            if (ev.zip_url) {
+              const zipLink = document.getElementById('download_zip');
+              zipLink.href = ev.zip_url;
+              zipLink.classList.remove('hidden');
+            }
             return;
           }
         }
