@@ -501,6 +501,7 @@ def generate():
                         rib_y_center=rib_y_center, rib_x_center=rib_x_center,
                         long_x_center=long_x_center, longitudinal_segments=longitudinal_segments,
                         bg_color=bg_color, line_color=line_color, scale_pct=scale_pct,
+                        label_sections=label_sections,
                     )
                     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
                         for view_name, img_path in saved.items():
