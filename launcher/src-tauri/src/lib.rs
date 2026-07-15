@@ -164,6 +164,7 @@ pub fn run() {
             WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title("Orthographic Template Generator")
                 .inner_size(1100.0, 820.0)
+                .center()
                 .resizable(true)
                 .disable_drag_drop_handler()
                 .on_download(|_webview, event| {
