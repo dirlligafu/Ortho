@@ -662,7 +662,7 @@ def export_split_views(view_results, output_dir, base_name, axis_cfg,
                        rib_y_center=None, rib_x_center=None, long_x_center=None,
                        longitudinal_segments=None,
                        bg_color="#FFFFFF", line_color="#000000",
-                       scale_pct=100, dpi_base=250):
+                       scale_pct=100, dpi_base=250, label_sections=False):
     """All images max_dim x max_dim, anchored on model world center.
 
     axis_cfg: required, same reasoning as compose_image() -- the rib/
@@ -723,7 +723,9 @@ def export_split_views(view_results, output_dir, base_name, axis_cfg,
         if axis_kind and rib_fracs:
             content_span = (bboxes[name][1] - bboxes[name][0]) if axis_kind == "x" \
                 else (bboxes[name][3] - bboxes[name][2])
-            fracs_for_view = [(0.5 + ((1 - f if mirrored else f) - 0.5) * content_span / max_dim, i + 1)
+            padded_span = content_span * (1 + 2 * pad_frac)
+            fracs_for_view = [(0.5 + ((1 - f if mirrored else f) - 0.5) * content_span / padded_span,
+                               (i + 1) if label_sections else None)
                                for i, f in enumerate(rib_fracs)]
         else:
             fracs_for_view = []
@@ -795,7 +797,8 @@ def export_split_views(view_results, output_dir, base_name, axis_cfg,
                      long_cy - max_dim / 2, long_cy + max_dim / 2)
         xmin, xmax, ymin, ymax = long_bbox
         cross_fracs = [
-            (_world_to_panel_x_frac(segs[0][0][long_h_idx], rib_ppm, long_bbox), i + 1)
+            (_world_to_panel_x_frac(segs[0][0][long_h_idx], rib_ppm, long_bbox),
+             (i + 1) if label_sections else None)
             for i, segs in enumerate(rib_sections or []) if segs
         ]
         fig = plt.figure(figsize=(max_dim / 100 * cs, max_dim / 100 * cs),
