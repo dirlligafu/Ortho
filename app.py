@@ -287,6 +287,7 @@ def generate():
             rib_cuts = max(1, int(data.get("rib_cuts", 1)))
             include_longitudinal = bool(data.get("include_longitudinal", False))
             split_views = data.get("split_views", False)
+            label_sections = bool(data.get("label_sections", False))
             bg_color = data.get("bg_color", "#FFFFFF")
             line_color = data.get("line_color", "#000000")
             scale_pct = int(data.get("scale_pct", 100))
