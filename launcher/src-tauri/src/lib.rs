@@ -4,6 +4,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use tauri::webview::DownloadEvent;
 use tauri::{AppHandle, Emitter, State, WebviewUrl, WebviewWindowBuilder};
+use tauri_plugin_opener::OpenerExt;
 
 #[derive(Clone)]
 struct FlaskChild(Arc<Mutex<Option<Child>>>);
@@ -128,6 +129,16 @@ fn launch_flask(python: String, state: State<'_, FlaskChild>) -> Result<(), Stri
 }
 
 #[tauri::command]
+fn reveal_output(app: AppHandle, url_path: String) -> Result<(), String> {
+    // url_path is like "/outputs/uuid.png" — resolve against the Ortho root
+    let rel = url_path.trim_start_matches('/');
+    let path = find_ortho_root().join(rel);
+    app.opener()
+        .reveal_item_in_dir(&path)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn navigate_to_flask(window: tauri::WebviewWindow) -> Result<(), String> {
     let url = "http://127.0.0.1:5000".parse().map_err(|e: url::ParseError| e.to_string())?;
     window.navigate(url).map_err(|e| e.to_string())
@@ -174,6 +185,7 @@ pub fn run() {
             install_deps,
             launch_flask,
             navigate_to_flask,
+            reveal_output,
         ])
         .on_window_event(move |_window, event| {
             if let tauri::WindowEvent::Destroyed = event {
