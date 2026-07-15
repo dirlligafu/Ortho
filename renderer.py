@@ -1210,6 +1210,35 @@ def rib_cut_fractions(n_cuts):
     return [k / (n_cuts + 1) for k in range(1, n_cuts + 1)]
 
 
+def _mesh_section_segments(mesh, axis_idx, frac):
+    """Cuts mesh perpendicular to world axis `axis_idx` (0=x, 1=y, 2=z) at
+    the given fraction (0..1) of the mesh's extent along that axis. Shared
+    core for render_rib_sections() and render_longitudinal_section() below
+    -- the only thing that differs between a forward-axis rib cut and a
+    side-axis longitudinal cut is which axis_idx gets passed in.
+
+    Returns a list of (p0_world, p1_world) segment pairs, possibly empty
+    if the plane happens to miss all geometry.
+    """
+    bmin, bmax = mesh.bounds
+    lo, hi = bmin[axis_idx], bmax[axis_idx]
+    pos = lo + frac * (hi - lo)
+    plane_origin = mesh.bounds.mean(axis=0)  # any point; only axis_idx's component matters
+    plane_origin[axis_idx] = pos
+
+    normal = np.zeros(3)
+    normal[axis_idx] = 1.0
+
+    section = mesh.section(plane_origin=plane_origin, plane_normal=normal)
+    segments = []
+    if section is not None:
+        for entity in section.entities:
+            pts = section.vertices[entity.points]
+            for i in range(len(pts) - 1):
+                segments.append((pts[i], pts[i + 1]))
+    return segments
+
+
 def render_rib_sections(mesh, axis_cfg, n_cuts=1):
     """Width-wise cross-section(s) perpendicular to the model's forward
     axis. True geometric mesh-plane intersection (trimesh's mesh.section),
@@ -1238,27 +1267,8 @@ def render_rib_sections(mesh, axis_cfg, n_cuts=1):
         raise ValueError("n_cuts must be >= 1 (1 = midpoint cut, matching the rib section's prior behavior).")
 
     fwd_idx = axis_cfg.axis_index(axis_cfg.forward_axis)
-    bmin, bmax = mesh.bounds
-    lo, hi = bmin[fwd_idx], bmax[fwd_idx]
-
-    fwd_vec = np.zeros(3)
-    fwd_vec[fwd_idx] = 1.0
-
-    all_segments = []
-    for k in range(1, n_cuts + 1):
-        frac = k / (n_cuts + 1)
-        pos = lo + frac * (hi - lo)
-        plane_origin = mesh.bounds.mean(axis=0)  # any point; only the forward-axis component matters
-        plane_origin[fwd_idx] = pos
-
-        section = mesh.section(plane_origin=plane_origin, plane_normal=fwd_vec)
-        segments = []
-        if section is not None:
-            for entity in section.entities:
-                pts = section.vertices[entity.points]
-                for i in range(len(pts) - 1):
-                    segments.append((pts[i], pts[i + 1]))
-        all_segments.append(segments)
+    all_segments = [_mesh_section_segments(mesh, fwd_idx, k / (n_cuts + 1))
+                     for k in range(1, n_cuts + 1)]
 
     # all_segments is built lo->hi along the forward (raw) axis. The
     # "front" camera position is defined elsewhere as center - fwd_vec*dist
@@ -1275,3 +1285,20 @@ def render_rib_sections(mesh, axis_cfg, n_cuts=1):
         all_segments = list(reversed(all_segments))
 
     return all_segments
+
+
+def render_longitudinal_section(mesh, axis_cfg):
+    """Single cross-section cut through the model's exact midpoint,
+    perpendicular to the side (left-right) axis -- shows what's actually
+    at the model's centerline, as opposed to the left/right silhouette
+    (which is an envelope of everything across the model's width, e.g.
+    turrets or mirrors offset to either side, and so can be misleading as
+    a stand-in for "what's really at the center").
+
+    Always exactly one cut at fraction 0.5 -- no count parameter like
+    render_rib_sections, and no front_sign-based reversal, since
+    side_axis has no directional-sign concept in AxisConfig to begin
+    with. Returns a flat (p0, p1) segment list, not a list-of-lists.
+    """
+    side_idx = axis_cfg.axis_index(axis_cfg.side_axis)
+    return _mesh_section_segments(mesh, side_idx, 0.5)

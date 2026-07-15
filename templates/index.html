@@ -198,6 +198,7 @@
     <label><input type="checkbox" class="view_cb" value="top" checked> Top</label>
     <label><input type="checkbox" class="view_cb" value="bottom"> Bottom</label>
     <label><input type="checkbox" id="rib_cb"> Cross-section cut(s)</label>
+    <label><input type="checkbox" id="longitudinal_cb"> Longitudinal section</label>
   </div>
   <div class="color_row" style="margin-top:8px;">
     <label>Number of cuts
@@ -322,6 +323,7 @@ function applyGlobalPrefs(prefs) {
   document.getElementById('rib_cb').checked = !!prefs.include_rib;
   document.getElementById('rib_cuts_slider').value = prefs.rib_cuts || 1;
   document.getElementById('rib_cuts_val').textContent = prefs.rib_cuts || 1;
+  document.getElementById('longitudinal_cb').checked = !!prefs.include_longitudinal;
   document.getElementById('bg_color').value = prefs.bg_color || '#FFFFFF';
   document.getElementById('line_color').value = prefs.line_color || '#000000';
   document.getElementById('scale_slider').value = prefs.scale_pct || 100;
@@ -463,8 +465,9 @@ function generate() {
   if (!sessionId) return;
   const views = Array.from(document.querySelectorAll('.view_cb:checked')).map(cb => cb.value);
   const includeRib = document.getElementById('rib_cb').checked;
-  if (views.length === 0 && !includeRib) {
-    document.getElementById('gen_status').textContent = 'Pick at least one view (or the rib cross-section).';
+  const includeLongitudinal = document.getElementById('longitudinal_cb').checked;
+  if (views.length === 0 && !includeRib && !includeLongitudinal) {
+    document.getElementById('gen_status').textContent = 'Pick at least one view (or a cross-section).';
     document.getElementById('gen_status').style.color = '#c0392b';
     return;
   }
@@ -485,6 +488,7 @@ function generate() {
     views: views,
     include_rib: includeRib,
     rib_cuts: parseInt(document.getElementById('rib_cuts_slider').value),
+    include_longitudinal: includeLongitudinal,
     bg_color: document.getElementById('bg_color').value,
     line_color: document.getElementById('line_color').value,
     scale_pct: parseInt(document.getElementById('scale_slider').value),
