@@ -2,7 +2,8 @@ use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Emitter, State};
+use tauri::webview::DownloadEvent;
+use tauri::{AppHandle, Emitter, State, WebviewUrl, WebviewWindowBuilder};
 
 #[derive(Clone)]
 struct FlaskChild(Arc<Mutex<Option<Child>>>);
@@ -140,6 +141,19 @@ pub fn run() {
     tauri::Builder::default()
         .manage(flask_state)
         .plugin(tauri_plugin_opener::init())
+        .setup(|app| {
+            WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+                .title("Orthographic Template Generator")
+                .inner_size(1100.0, 820.0)
+                .resizable(true)
+                .disable_drag_drop_handler()
+                .on_download(|_webview, event| {
+                    // Allow downloads; return false only to cancel
+                    !matches!(event, DownloadEvent::Finished { .. })
+                })
+                .build()?;
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             find_python,
             deps_need_install,
