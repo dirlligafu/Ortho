@@ -200,6 +200,7 @@
     <label><input type="checkbox" id="rib_cb"> Cross-section cut(s)</label>
     <label><input type="checkbox" id="longitudinal_cb"> Longitudinal section</label>
     <label><input type="checkbox" id="split_views_cb"> Export split views (ZIP)</label>
+    <label><input type="checkbox" id="include_blender_script_cb"> Include Blender scene script</label>
   </div>
   <div class="color_row" style="margin-top:8px;">
     <label>Number of cuts
@@ -495,6 +496,7 @@ function generate() {
     rib_cuts: parseInt(document.getElementById('rib_cuts_slider').value),
     include_longitudinal: includeLongitudinal,
     split_views: document.getElementById('split_views_cb').checked,
+    include_blender_script: document.getElementById('include_blender_script_cb').checked,
     bg_color: document.getElementById('bg_color').value,
     line_color: document.getElementById('line_color').value,
     scale_pct: parseInt(document.getElementById('scale_slider').value),
