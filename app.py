@@ -63,12 +63,32 @@ import os
 import json
 import time
 import uuid
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from flask import Flask, request, render_template, jsonify, send_from_directory, Response, stream_with_context
 
 from model_loader import load_model, build_filtered_mesh, ModelLoadError, SUPPORTED_EXTENSIONS, load_model_from_zip, remap_part_face_ranges
 from renderer import get_model_scale, detect_front_axis, render_view, render_rib_sections, AxisConfig, compute_ambient_occlusion, rotate_mesh_around_up_axis, compute_part_centroids, project_part_labels, AOPerformanceError, finalize_ssao_views, compute_directional_shading
 from compositor import compose_image
+
+def _render_view_worker(args):
+    """Worker function for parallel view rendering.
+
+    Must be a top-level module function so multiprocessing can pickle it on
+    Windows (spawn start method). Each worker runs in its own process with
+    its own OpenGL context, which is why processes are used instead of threads.
+    """
+    view_name, filtered, center, half_span, dist, axis_cfg, render_res, ao_mesh, ao_mode, ao_max_darkness = args
+    import time as _time
+    from renderer import render_view as _render_view
+    t0 = _time.perf_counter()
+    result = _render_view(
+        filtered, view_name, center, half_span, dist, axis_cfg,
+        resolution=render_res, ao_mesh=ao_mesh,
+        ao_mode=ao_mode, ao_max_darkness=ao_max_darkness,
+    )
+    return view_name, result, _time.perf_counter() - t0
+
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
@@ -400,19 +420,25 @@ def generate():
             view_start = 0.55 if (ao_enabled and ao_mode in ("vertex", "directional")) else 0.05
             _t_views_start = time.perf_counter()
             view_timings = {}
-            for i, v in enumerate(views):
-                prog = view_start + (0.85 - view_start) * (i / n_views)
-                yield _event(f"Rendering {v} view ({i + 1}/{n_views})…", prog)
-                _t = time.perf_counter()
-                view_results[v] = render_view(
-                    filtered, v, center, half_span, dist, axis_cfg,
-                    resolution=render_res, ao_mesh=ao_mesh,
-                    ao_mode=(ao_mode if ao_enabled else None),
-                    ao_max_darkness=ao_darkness / 100.0,
-                )
-                view_timings[v] = time.perf_counter() - _t
-                if part_centroids:
-                    r = view_results[v]
+            n_workers = min(n_views, os.cpu_count() or 4)
+            args_list = [
+                (v, filtered, center, half_span, dist, axis_cfg, render_res, ao_mesh,
+                 ao_mode if ao_enabled else None, ao_darkness / 100.0)
+                for v in views
+            ]
+            yield _event(f"Rendering {n_views} views ({n_workers} parallel)…", view_start)
+            with ProcessPoolExecutor(max_workers=n_workers) as executor:
+                futures = {executor.submit(_render_view_worker, a): a[0] for a in args_list}
+                completed = 0
+                for future in as_completed(futures):
+                    view_name, result, elapsed = future.result()
+                    view_results[view_name] = result
+                    view_timings[view_name] = elapsed
+                    completed += 1
+                    prog = view_start + (0.85 - view_start) * (completed / n_views)
+                    yield _event(f"Rendered {view_name} view ({completed}/{n_views})…", prog)
+            if part_centroids:
+                for v, r in view_results.items():
                     r["part_labels"] = project_part_labels(
                         part_centroids, r["pose"], r["xmag"], r["ymag"], r["resolution"]
                     )

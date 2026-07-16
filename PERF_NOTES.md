@@ -125,42 +125,62 @@ cost does not depend on mesh density.
 
 ## Parallelization targets (priority order)
 
-### Target 1 -- the 6 view renders (highest ROI for SSAO)
+### Target 1 -- the 6 view renders (DONE)
 
-Each `render_view()` call is fully independent. With `ProcessPoolExecutor`
-and 6 workers the theoretical speedup on the views phase is up to 6x.
-For SSAO specifically this would cut ~60s down to ~10s (the cost of the
-slowest single view).
+Implemented via `ProcessPoolExecutor` in `app.py`. Each `render_view()` call
+runs in its own process with its own OpenGL context. Progress events are
+yielded via `as_completed()` as each view finishes.
 
-Constraint: pyrender/OpenGL requires separate OS processes (not threads)
-because each process needs its own GL context.
-
-Constraint: the SSE progress stream in `app.py` sends per-view progress
-events. With parallel rendering these need to be collected via a `Queue`
-shared between the main process and the worker processes.
-
-Constraint: the mesh object must be serialized (pickled) to each worker
-process. For very large meshes this adds overhead that partially offsets
-the gain.
-
-### Target 2 -- composition (matplotlib)
-
-At ~9.5s with AO enabled, composition is worth investigating. The 6 view
-figures are independent and could be rendered in parallel with
-`ProcessPoolExecutor` before being assembled into the final composite.
-However, matplotlib's figure rendering is partially GIL-bound, so gains
-may be more modest than for the view renders.
-
-### Target 3 -- AO vertex chunks
+### Target 2 -- AO vertex chunks (highest remaining priority)
 
 `compute_ambient_occlusion()` already processes vertices in chunks of 20k.
-These chunks could be distributed across a process pool. On small models
-(3.59s) this is low priority. On large models (~125s) it becomes the single
-biggest win available -- higher priority than view parallelization for
-vertex AO users.
+These chunks could be distributed across a process pool. On large models
+(~125s precompute) this is the single biggest remaining win -- view
+parallelization barely moves the needle when precompute dominates.
+
+### Target 3 -- composition (matplotlib)
+
+At ~10-16s with AO enabled on large models, composition is worth
+investigating. However, matplotlib's figure rendering is partially
+GIL-bound, so gains may be more modest than for the view renders.
+
+## Results after view parallelization
+
+### Model A (4.6 MB, 83k faces)
+
+| Mode | Sequential | Parallel | Gain |
+|---|---|---|---|
+| No AO | 13.22s | 8.72s | x1.5 |
+| Vertex AO | 25.48s | 19.93s | x1.3 |
+| Directional AO | 21.58s | 15.24s | x1.4 |
+| SSAO | 74.06s | 26.18s | x2.8 |
+
+### Model B (45 MB, 385k faces)
+
+| Mode | Sequential | Parallel | Gain |
+|---|---|---|---|
+| No AO | 24.78s | 12.67s | x2.0 |
+| Vertex AO | ~162s | 147.98s | x1.1 |
+| Directional AO | 52.53s | 36.38s | x1.4 |
+| SSAO | 86.38s | 34.52s | x2.5 |
+
+### Key observations
+
+SSAO is the biggest winner: x2.8 on small models, x2.5 on large ones. The
+per-view cost (~10-14s) is substantial and parallelizes almost perfectly.
+
+No AO scales better on large models (x2.0) than small (x1.5): with heavier
+geometry per view, the render cost dominates the pickle overhead more cleanly.
+
+Vertex AO is nearly unchanged on large models (x1.1) because the precompute
+(117s) eclipses the views (14s). Parallelizing the AO chunks is the only
+meaningful path forward for this mode on high-polygon meshes.
+
+Composition (~10-16s with AO) is now the dominant cost for vertex and
+directional modes on Model A, and a significant fraction on Model B.
+It is not yet parallelized.
 
 ## Next step
 
-Implement parallel view rendering with `ProcessPoolExecutor`, keeping the
-SSE progress stream functional via a `multiprocessing.Queue`. Measure the
-result against this baseline using the same model and same settings.
+Parallelize `compute_ambient_occlusion()` vertex chunks across a process pool
+to address the vertex AO bottleneck on large models.
