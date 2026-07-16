@@ -204,6 +204,22 @@ saturates available cores on large meshes, limiting process-level gains.
 Composition (~13-16s with AO on Model B) is now the dominant remaining
 bottleneck for vertex and directional modes on large models.
 
+## Output correctness
+
+All four AO modes were tested against vanilla Ortho (origin/main) using the
+same model and settings. No visual difference was detected between sequential
+and parallel outputs for No AO, SSAO, and Directional modes.
+
+Vertex AO produces outputs that are visually identical but not pixel-perfect:
+the parallel version differs by ~3 KB in PNG file size. This is expected and
+intentional. The sequential version uses a single shared RNG (Random Number
+Generator) across all chunks, so random samples are continuous across chunk
+boundaries. The parallel version gives each worker its own seed (seed + chunk
+index) to avoid correlated samples between chunks. The resulting AO values
+differ within the noise of the 80-ray hemisphere sampling -- visually
+indistinguishable, and arguably slightly better (less inter-chunk correlation).
+This is a known and accepted tradeoff, not a defect.
+
 ## Remaining opportunities
 
 - Composition (matplotlib): ~13-16s with AO, not yet parallelized
