@@ -131,56 +131,83 @@ Implemented via `ProcessPoolExecutor` in `app.py`. Each `render_view()` call
 runs in its own process with its own OpenGL context. Progress events are
 yielded via `as_completed()` as each view finishes.
 
-### Target 2 -- AO vertex chunks (highest remaining priority)
+### Target 2 -- AO vertex chunks (DONE)
 
-`compute_ambient_occlusion()` already processes vertices in chunks of 20k.
-These chunks could be distributed across a process pool. On large models
-(~125s precompute) this is the single biggest remaining win -- view
-parallelization barely moves the needle when precompute dominates.
+Implemented via `ProcessPoolExecutor` in `renderer.py`. A new top-level
+worker function `_ao_chunk_worker` receives raw numpy arrays (vertices +
+faces) instead of a trimesh object -- safer to pickle across platforms as
+the embree C++ internals are not guaranteed to survive pickling. trimesh
+and the embree intersector are re-initialized fresh inside each worker.
+Each chunk gets its own seed (seed + chunk_index) to avoid correlated
+samples across chunks.
+
+Worker count formula: `round((os.cpu_count() or 4) / 4) + 1`
+
+This was tuned empirically on a 20-core Intel Core Ultra 7 265KF. The key
+finding: embree already uses multiple threads internally (OpenMP), so
+launching too many worker processes causes CPU oversubscription and
+degrades performance. Results on Model B (385k faces):
+
+| Workers | AO precompute | Total |
+|---|---|---|
+| Sequential | ~125s | ~162s |
+| 4 workers | 97s | 124s |
+| 6 workers (sweet spot) | 84s | 112s |
+| 8 workers | 95s | 124s |
+| 19 workers (cpu_count) | 98s | 128s |
+| `round(20/4)+1` = 6 | 87s | 117s |
+
+The formula gives 6 on 20 cores, 5 on 16 cores, 4 on 12 cores, 3 on 8
+cores, 2 on 4 cores. Validated at ~117s on the test machine (within noise
+of the hardcoded-6 result of 112s).
+
+Note: embree's internal threading behavior may differ between Intel and AMD
+architectures, or between CPUs with very different core counts and cache
+sizes. The formula is a reasonable starting point, not a universal optimum.
+Further tuning by contributors with different hardware is welcome.
 
 ### Target 3 -- composition (matplotlib)
 
-At ~10-16s with AO enabled on large models, composition is worth
-investigating. However, matplotlib's figure rendering is partially
-GIL-bound, so gains may be more modest than for the view renders.
+At ~13-16s with AO enabled on Model B, composition remains the next
+bottleneck. Not yet parallelized. matplotlib's figure rendering is
+partially GIL-bound, so gains may be more modest than for the other stages.
 
-## Results after view parallelization
+## Results after view + AO chunk parallelization
 
 ### Model A (4.6 MB, 83k faces)
 
-| Mode | Sequential | Parallel | Gain |
-|---|---|---|---|
-| No AO | 13.22s | 8.72s | x1.5 |
-| Vertex AO | 25.48s | 19.93s | x1.3 |
-| Directional AO | 21.58s | 15.24s | x1.4 |
-| SSAO | 74.06s | 26.18s | x2.8 |
+| Mode | Sequential | Views // | Views + chunks // | Best gain |
+|---|---|---|---|---|
+| No AO | 13.22s | 8.72s | n/a | x1.5 |
+| Vertex AO | 25.48s | 19.93s | 16.20s | x1.6 |
+| Directional AO | 21.58s | 15.24s | n/a | x1.4 |
+| SSAO | 74.06s | 26.18s | n/a | x2.8 |
 
 ### Model B (45 MB, 385k faces)
 
-| Mode | Sequential | Parallel | Gain |
-|---|---|---|---|
-| No AO | 24.78s | 12.67s | x2.0 |
-| Vertex AO | ~162s | 147.98s | x1.1 |
-| Directional AO | 52.53s | 36.38s | x1.4 |
-| SSAO | 86.38s | 34.52s | x2.5 |
+| Mode | Sequential | Views // | Views + chunks // | Best gain |
+|---|---|---|---|---|
+| No AO | 24.78s | 12.67s | n/a | x2.0 |
+| Vertex AO | ~162s | 147.98s | ~117s | x1.4 |
+| Directional AO | 52.53s | 36.38s | n/a | x1.4 |
+| SSAO | 86.38s | 34.52s | n/a | x2.5 |
 
 ### Key observations
 
-SSAO is the biggest winner: x2.8 on small models, x2.5 on large ones. The
-per-view cost (~10-14s) is substantial and parallelizes almost perfectly.
+SSAO remains the biggest winner overall: x2.8 on small models, x2.5 on
+large ones. The per-view cost parallelizes almost perfectly.
 
-No AO scales better on large models (x2.0) than small (x1.5): with heavier
-geometry per view, the render cost dominates the pickle overhead more cleanly.
+AO chunk parallelization is most impactful on small models (x18 on the
+precompute alone for Model A) because embree's internal threading already
+saturates available cores on large meshes, limiting process-level gains.
 
-Vertex AO is nearly unchanged on large models (x1.1) because the precompute
-(117s) eclipses the views (14s). Parallelizing the AO chunks is the only
-meaningful path forward for this mode on high-polygon meshes.
+Composition (~13-16s with AO on Model B) is now the dominant remaining
+bottleneck for vertex and directional modes on large models.
 
-Composition (~10-16s with AO) is now the dominant cost for vertex and
-directional modes on Model A, and a significant fraction on Model B.
-It is not yet parallelized.
+## Remaining opportunities
 
-## Next step
-
-Parallelize `compute_ambient_occlusion()` vertex chunks across a process pool
-to address the vertex AO bottleneck on large models.
+- Composition (matplotlib): ~13-16s with AO, not yet parallelized
+- AO chunk worker count: further tuning on AMD, Apple Silicon, and
+  high-core-count machines (Threadripper, etc.)
+- Chunk size (currently 20k vertices): larger chunks may reduce
+  process startup overhead on large models

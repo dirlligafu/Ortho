@@ -26,6 +26,7 @@ import pyrender
 from skimage import measure
 from scipy.spatial import cKDTree
 from scipy.ndimage import gaussian_filter
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from depth_render import make_camera_pose, render_depth
 from visibility import compute_visible_edges, pyrender_depth_to_true_distance, project_points
@@ -474,6 +475,56 @@ def _check_embree_active(mesh):
         )
 
 
+def _ao_chunk_worker(args):
+    """Worker for parallel AO ray-casting.
+
+    Receives raw numpy arrays instead of a trimesh object so pickling is
+    reliable across platforms (the embree C++ internals are not guaranteed
+    to survive pickling). trimesh and the embree intersector are
+    re-initialized fresh inside each worker process.
+    """
+    chunk_pts, chunk_normals, cast_vertices, cast_faces, n_rays, max_distance, offset, seed = args
+    import numpy as _np
+    import trimesh as _trimesh
+
+    cast_target = _trimesh.Trimesh(vertices=cast_vertices, faces=cast_faces, process=False)
+    n_chunk = len(chunk_pts)
+    rng = _np.random.default_rng(seed)
+
+    u1 = rng.random((n_chunk, n_rays))
+    u2 = rng.random((n_chunk, n_rays))
+    r = _np.sqrt(u1)
+    theta = 2 * _np.pi * u2
+    lx = r * _np.cos(theta)
+    ly = r * _np.sin(theta)
+    lz = _np.sqrt(_np.maximum(0, 1 - u1))
+
+    nx, ny, nz = chunk_normals[:, 0], chunk_normals[:, 1], chunk_normals[:, 2]
+    sign = _np.where(nz >= 0, 1.0, -1.0)
+    a = -1.0 / (sign + nz)
+    b = nx * ny * a
+    tangent = _np.stack([1.0 + sign * nx * nx * a, sign * b, -sign * nx], axis=1)
+    bitangent = _np.stack([b, sign + ny * ny * a, -ny], axis=1)
+
+    dirs = (lx[:, :, None] * tangent[:, None, :]
+            + ly[:, :, None] * bitangent[:, None, :]
+            + lz[:, :, None] * chunk_normals[:, None, :])
+
+    origins_flat = (_np.repeat(chunk_pts, n_rays, axis=0)
+                    + _np.repeat(chunk_normals, n_rays, axis=0) * offset)
+    dirs_flat = dirs.reshape(-1, 3)
+
+    locations, index_ray, _ = cast_target.ray.intersects_location(
+        origins_flat, dirs_flat, multiple_hits=False)
+    hits = _np.zeros(len(origins_flat), dtype=bool)
+    if len(index_ray):
+        dist = _np.linalg.norm(locations - origins_flat[index_ray], axis=1)
+        within = dist <= max_distance
+        hits[index_ray[within]] = True
+    hits_per_point = hits.reshape(n_chunk, n_rays).sum(axis=1)
+    return hits_per_point / n_rays
+
+
 def _sample_ao_hemisphere(points, normals, cast_target, n_rays, max_distance,
                            offset, seed=0, progress_callback=None, points_per_chunk=20000):
     """Casts cosine-weighted hemisphere rays from each (point, normal) pair
@@ -493,49 +544,35 @@ def _sample_ao_hemisphere(points, normals, cast_target, n_rays, max_distance,
     vertices/vertex normals; for the per-texel path they're texel surface
     positions/normals from uv_bake.rasterize_uv().
     """
-    rng = np.random.default_rng(seed)
     n_points = len(points)
     occlusion = np.zeros(n_points)
 
-    for i in range(0, n_points, points_per_chunk):
-        chunk_pts = points[i:i + points_per_chunk]
-        chunk_normals = normals[i:i + points_per_chunk]
-        n_chunk = len(chunk_pts)
+    cast_vertices = np.asarray(cast_target.vertices)
+    cast_faces = np.asarray(cast_target.faces)
 
-        u1 = rng.random((n_chunk, n_rays))
-        u2 = rng.random((n_chunk, n_rays))
-        r = np.sqrt(u1)
-        theta = 2 * np.pi * u2
-        lx = r * np.cos(theta)
-        ly = r * np.sin(theta)
-        lz = np.sqrt(np.maximum(0, 1 - u1))
+    chunk_starts = list(range(0, n_points, points_per_chunk))
+    args_list = [
+        (points[i:i + points_per_chunk],
+         normals[i:i + points_per_chunk],
+         cast_vertices, cast_faces,
+         n_rays, max_distance, offset,
+         seed + idx)
+        for idx, i in enumerate(chunk_starts)
+    ]
 
-        nx, ny, nz = chunk_normals[:, 0], chunk_normals[:, 1], chunk_normals[:, 2]
-        sign = np.where(nz >= 0, 1.0, -1.0)
-        a = -1.0 / (sign + nz)
-        b = nx * ny * a
-        tangent = np.stack([1.0 + sign * nx * nx * a, sign * b, -sign * nx], axis=1)
-        bitangent = np.stack([b, sign + ny * ny * a, -ny], axis=1)
-
-        dirs = (lx[:, :, None] * tangent[:, None, :]
-                + ly[:, :, None] * bitangent[:, None, :]
-                + lz[:, :, None] * chunk_normals[:, None, :])
-
-        origins_flat = np.repeat(chunk_pts, n_rays, axis=0) + np.repeat(chunk_normals, n_rays, axis=0) * offset
-        dirs_flat = dirs.reshape(-1, 3)
-
-        locations, index_ray, _ = cast_target.ray.intersects_location(
-            origins_flat, dirs_flat, multiple_hits=False)
-        hits = np.zeros(len(origins_flat), dtype=bool)
-        if len(index_ray):
-            dist = np.linalg.norm(locations - origins_flat[index_ray], axis=1)
-            within = dist <= max_distance
-            hits[index_ray[within]] = True
-        hits_per_point = hits.reshape(n_chunk, n_rays).sum(axis=1)
-        occlusion[i:i + n_chunk] = hits_per_point / n_rays
-
-        if progress_callback:
-            progress_callback(min(i + n_chunk, n_points), n_points)
+    n_workers = min(len(args_list), round((os.cpu_count() or 4) / 4) + 1)
+    with ProcessPoolExecutor(max_workers=n_workers) as executor:
+        futures = {executor.submit(_ao_chunk_worker, args): start_i
+                   for args, start_i in zip(args_list, chunk_starts)}
+        completed = 0
+        for future in as_completed(futures):
+            start_i = futures[future]
+            chunk_result = future.result()
+            n_chunk = len(chunk_result)
+            occlusion[start_i:start_i + n_chunk] = chunk_result
+            completed += n_chunk
+            if progress_callback:
+                progress_callback(min(completed, n_points), n_points)
 
     return occlusion
 
