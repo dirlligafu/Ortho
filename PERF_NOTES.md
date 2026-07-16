@@ -39,7 +39,10 @@ Stages measured individually:
 
 ## Baseline measurements
 
-Test model: a mid-complexity car mesh (Assetto Corsa KN5), 6 views, cross-sections enabled.
+All runs: 6 views (front/back/left/right/top/bottom) + cross-sections enabled.
+Machine: Intel Core Ultra 7 265KF @ 3.90 GHz, 32 GB RAM, Windows 11.
+
+### Model A -- mid-complexity (4.6 MB .glb, 44 parts, 83,430 faces)
 
 | Mode | AO precompute | Views total | Composition | Total |
 |---|---|---|---|---|
@@ -51,6 +54,28 @@ Test model: a mid-complexity car mesh (Assetto Corsa KN5), 6 views, cross-sectio
 Individual view times are very consistent (~1.7-2.1s each without AO, ~10s
 each with SSAO), which confirms the views are independent and uniform --
 a good candidate for parallelization.
+
+### Model B -- high-complexity (45 MB .glb, 41 parts, 385,858 faces)
+
+Vertex AO was run twice to rule out background task interference.
+Both runs confirm the result is stable (111-140s range, ~16% variance).
+
+| Mode | AO precompute | Views total | Composition | Total |
+|---|---|---|---|---|
+| No AO | - | 18.97s | 5.42s | 24.78s |
+| Vertex AO (run 1) | 140.68s | 21.75s | 13.42s | 176.28s |
+| Vertex AO (run 2) | 111.53s | 21.94s | 14.17s | 148.06s |
+| Directional AO | 17.27s | 21.06s | 13.77s | 52.53s |
+| SSAO ("Fast") | - | 71.45s | 13.59s | 86.38s |
+
+### Scaling comparison (Model A -> Model B, 4.6x more faces)
+
+| Mode | Model A | Model B | Ratio |
+|---|---|---|---|
+| No AO | 13.22s | 24.78s | x1.9 |
+| Vertex AO | 25.48s | ~162s (avg) | x6.4 |
+| Directional AO | 21.58s | 52.53s | x2.4 |
+| SSAO | 74.06s | 86.38s | x1.2 |
 
 ## Key findings
 
@@ -73,17 +98,30 @@ The likely explanation: AO-enabled view results carry per-pixel shading data
 (float arrays) that matplotlib has to process on top of the base geometry.
 This is an unexpected bottleneck -- composition was assumed to be cheap.
 
-### 3. Directional AO is the cheapest mode overall
+### 3. Directional AO is the cheapest mode overall (small models)
 
-Precompute is nearly instant (0.21s, a single dot-product pass per vertex).
-Total is 21.58s, only 8s more than no AO. The composition overhead (~9.4s)
-dominates its cost.
+On Model A, precompute is nearly instant (0.21s). On Model B it jumps to
+17.27s, which suggests it involves more than a simple dot-product pass --
+likely a vertex merge or KD-tree operation that scales super-linearly.
 
-### 4. Vertex AO offers the best quality/time ratio
+### 4. Vertex AO scales super-linearly with mesh density
 
-At 25.48s total, it is 3x faster than SSAO (74s) on this model while
-producing per-vertex baked shading. The precompute (3.59s) is a one-time
-cost that does not scale with the number of views.
+Going from 83k to 385k faces (4.6x) pushes vertex AO precompute from 3.59s
+to ~125s average (x35). The ray-casting complexity is O(V x R x log F) where
+V = vertices, R = 80 rays per vertex, F = faces. Beyond a mesh density
+threshold, BVH traversal depth and CPU cache pressure compound each other,
+producing a much steeper-than-linear curve in practice.
+
+On large models, vertex AO precompute dominates all other stages combined.
+Parallelizing its chunks across CPU cores becomes the highest priority.
+
+### 5. Vertex AO offers the best quality/time ratio on small models
+
+At 25.48s total on Model A, it is 3x faster than SSAO (74s) while producing
+per-vertex baked shading. The precompute is a one-time cost independent of
+the number of views. On Model B the advantage reverses: SSAO (86s) is faster
+than vertex AO (~162s) despite scaling worse per-view, because its per-view
+cost does not depend on mesh density.
 
 ## Parallelization targets (priority order)
 
@@ -116,8 +154,10 @@ may be more modest than for the view renders.
 ### Target 3 -- AO vertex chunks
 
 `compute_ambient_occlusion()` already processes vertices in chunks of 20k.
-These chunks could be distributed across a process pool. Lower priority
-because the current 3.59s is already acceptable.
+These chunks could be distributed across a process pool. On small models
+(3.59s) this is low priority. On large models (~125s) it becomes the single
+biggest win available -- higher priority than view parallelization for
+vertex AO users.
 
 ## Next step
 
