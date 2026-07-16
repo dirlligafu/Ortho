@@ -249,6 +249,11 @@
   <div id="download_row" class="hidden" style="margin-top:8px;">
     <a id="download_link" download="orthographic_template.png">Download image</a>
   </div>
+  <div id="timings_box" class="hidden" style="margin-top:12px;font-size:0.85em;color:var(--text_muted);border-top:1px solid var(--section_border);padding-top:10px;">
+    <strong>Render timings</strong>
+    <table id="timings_table" style="margin-top:6px;border-collapse:collapse;">
+    </table>
+  </div>
 </div>
 
 <script>
@@ -463,6 +468,7 @@ function generate() {
             const fmt = document.getElementById('output_format_select').value;
             link.setAttribute('download', 'orthographic_template.' + fmt);
             document.getElementById('download_row').classList.remove('hidden');
+            if (ev.timings) renderTimings(ev.timings);
             return;
           }
         }
@@ -475,6 +481,28 @@ function generate() {
     document.getElementById('gen_status').style.color = '#c0392b';
     progressWrap.classList.add('hidden');
   });
+}
+
+function renderTimings(t) {
+  const fmt = s => s.toFixed(2) + 's';
+  const rows = [];
+  if (t.ao_precompute != null) rows.push(['AO precompute', fmt(t.ao_precompute)]);
+  if (t.views) {
+    Object.entries(t.views).forEach(([v, s]) => rows.push([' ' + v + ' view', fmt(s)]));
+  }
+  if (t.views_total != null) rows.push(['Views total', fmt(t.views_total)]);
+  if (t.ssao_finalize != null) rows.push(['SSAO finalize', fmt(t.ssao_finalize)]);
+  if (t.rib_sections != null) rows.push(['Cross-sections', fmt(t.rib_sections)]);
+  if (t.compose != null) rows.push(['Composition', fmt(t.compose)]);
+  if (t.total != null) rows.push(['Total', fmt(t.total)]);
+
+  const table = document.getElementById('timings_table');
+  table.innerHTML = rows.map(([label, val], i) => {
+    const bold = (label === 'Total') ? 'font-weight:bold;' : '';
+    const border = (label === 'Total') ? 'border-top:1px solid var(--section_border);' : '';
+    return `<tr><td style="padding:1px 16px 1px 0;${bold}${border}">${label}</td><td style="text-align:right;${bold}${border}">${val}</td></tr>`;
+  }).join('');
+  document.getElementById('timings_box').classList.remove('hidden');
 }
 </script>
 

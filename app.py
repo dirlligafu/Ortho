@@ -61,6 +61,7 @@ _check_dependencies()
 
 import os
 import json
+import time
 import uuid
 
 from flask import Flask, request, render_template, jsonify, send_from_directory, Response, stream_with_context
@@ -253,7 +254,7 @@ def generate():
     if session_id not in _MODEL_CACHE:
         return jsonify({"error": "Session expired or invalid. Please re-upload the file."}), 400
 
-    def _event(msg, progress, done=False, image_url=None, error=None):
+    def _event(msg, progress, done=False, image_url=None, error=None, timings=None):
         import json as _json
         payload = {"message": msg, "progress": progress}
         if done:
@@ -262,6 +263,8 @@ def generate():
             payload["image_url"] = image_url
         if error:
             payload["error"] = error
+        if timings:
+            payload["timings"] = timings
         return f"data: {_json.dumps(payload)}\n\n"
 
     def stream():
@@ -270,6 +273,9 @@ def generate():
             if cached is None:
                 yield _event("Session expired.", 0, error="Session expired or invalid.")
                 return
+
+            t_start = time.perf_counter()
+            timings = {}
 
             mesh = cached["mesh"]
             part_face_ranges = cached["part_face_ranges"]
@@ -367,18 +373,22 @@ def generate():
             ao_mesh = None
             if ao_enabled and ao_mode == "vertex":
                 yield _event("Computing shading… 0%", 0.05)
+                _t = time.perf_counter()
                 ao_mesh = compute_ambient_occlusion(
                     filtered, axis_cfg=axis_cfg, ao_max_darkness=ao_darkness / 100.0,
                 )
+                timings["ao_precompute"] = time.perf_counter() - _t
                 yield _event("Computing shading… 100%", 0.55)
             elif ao_enabled and ao_mode == "directional":
                 # Cheap: one dot-product pass per vertex, no ray casting --
                 # negligible next to the ray-cast vertex bake above, but
                 # still gets its own progress tick for consistency.
                 yield _event("Computing shading… 0%", 0.05)
+                _t = time.perf_counter()
                 ao_mesh = compute_directional_shading(
                     filtered, axis_cfg=axis_cfg, ao_max_darkness=ao_darkness / 100.0,
                 )
+                timings["ao_precompute"] = time.perf_counter() - _t
                 yield _event("Computing shading… 100%", 0.55)
 
             view_results = {}
@@ -388,45 +398,58 @@ def generate():
             # each render_view() call below, so it starts at the same point
             # as "no AO" -- the per-view progress ticks reflect it instead.
             view_start = 0.55 if (ao_enabled and ao_mode in ("vertex", "directional")) else 0.05
+            _t_views_start = time.perf_counter()
+            view_timings = {}
             for i, v in enumerate(views):
                 prog = view_start + (0.85 - view_start) * (i / n_views)
                 yield _event(f"Rendering {v} view ({i + 1}/{n_views})…", prog)
+                _t = time.perf_counter()
                 view_results[v] = render_view(
                     filtered, v, center, half_span, dist, axis_cfg,
                     resolution=render_res, ao_mesh=ao_mesh,
                     ao_mode=(ao_mode if ao_enabled else None),
                     ao_max_darkness=ao_darkness / 100.0,
                 )
+                view_timings[v] = time.perf_counter() - _t
                 if part_centroids:
                     r = view_results[v]
                     r["part_labels"] = project_part_labels(
                         part_centroids, r["pose"], r["xmag"], r["ymag"], r["resolution"]
                     )
+            timings["views"] = view_timings
+            timings["views_total"] = time.perf_counter() - _t_views_start
 
             if ao_enabled and ao_mode == "ssao":
                 # Remap every view's raw occlusion against one shared range
                 # instead of each view stretching its own contrast alone,
                 # so darkness stays comparable across the composite sheet.
+                _t = time.perf_counter()
                 finalize_ssao_views(view_results)
+                timings["ssao_finalize"] = time.perf_counter() - _t
 
             rib_sections = []
             rib_ppm = 1.0
             if include_rib:
                 yield _event("Computing cross-sections…", 0.87)
+                _t = time.perf_counter()
                 rib_sections = render_rib_sections(filtered, axis_cfg, n_cuts=rib_cuts)
+                timings["rib_sections"] = time.perf_counter() - _t
                 rib_ppm = render_res / (half_span * 2)
 
             yield _event("Composing final image…", 0.93)
             out_name = f"{uuid.uuid4()}.{output_format}"
             out_path = os.path.join(OUTPUT_DIR, out_name)
             model_display_name = os.path.splitext(filename)[0] or None
+            _t = time.perf_counter()
             compose_image(
                 view_results, rib_sections, rib_ppm, out_path,
                 bg_color=bg_color, line_color=line_color, scale_pct=scale_pct,
                 model_name=model_display_name,
                 part_numbers=(part_numbers if label_parts else None),
             )
-            yield _event("Done.", 1.0, done=True, image_url=f"/outputs/{out_name}")
+            timings["compose"] = time.perf_counter() - _t
+            timings["total"] = time.perf_counter() - t_start
+            yield _event("Done.", 1.0, done=True, image_url=f"/outputs/{out_name}", timings=timings)
 
         except Exception as e:
             yield _event("", 0, error=f"Render failed: {e}")
