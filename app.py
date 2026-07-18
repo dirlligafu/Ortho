@@ -13,6 +13,7 @@ HOST = "127.0.0.1"
 PORT = 5000
 
 import sys
+import importlib.util
 import webbrowser
 
 
@@ -35,9 +36,7 @@ def _check_dependencies():
     }
     missing = []
     for module_name, pip_name in required.items():
-        try:
-            __import__(module_name)
-        except ImportError:
+        if importlib.util.find_spec(module_name) is None:
             missing.append(pip_name)
 
     if missing:
